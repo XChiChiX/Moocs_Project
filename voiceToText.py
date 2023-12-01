@@ -19,7 +19,7 @@ import whisper
 #     print(file_path)                          # 印出路徑
 #     update()
 
-def start(file_path):
+def generateTextFile(file_path):
     print("Converting...")
 
     with open("textAndTime.txt", "w", encoding="UTF-8") as file:
