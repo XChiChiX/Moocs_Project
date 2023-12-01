@@ -3,17 +3,25 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="/static/css/style.css">
     <title>好耶</title>
     <script src="https://kit.fontawesome.com/2c9a64bf03.js" crossorigin="anonymous"></script>
 </head>
 <body>
-    星爆氣流斬
+    <div class="container">
         <!-- <input type="file" id="original-video" accept="video/*"/> -->
-    <input type="file" id="original-video" />
-    <button class="start-btn"><i class="fa-solid fa-play"></i>啟動</button>
-
-    <button class="download-btn" id="DL-btn1"><i class="fa-solid fa-file-arrow-down"></i>下載純文字</button>
-    <button class="download-btn" id="DL-btn2"><i class="fa-solid fa-file-arrow-down"></i>下載含時間</button>
+        <div class="theme">
+            MoocsGO
+        </div>
+        <div class="file-input">
+            <input type="file" class="select-file" id="original-video" />
+            <button class="start-btn"><i class="fa-solid fa-play"></i>啟動</button>
+        </div>
+        <div class="download-block">
+            <button class="download-btn" id="DL-btn1"><i class="fa-solid fa-file-arrow-down"></i>下載純文字</button>
+            <button class="download-btn" id="DL-btn2"><i class="fa-solid fa-file-arrow-down"></i>下載含時間</button>
+        </div>
+    </div>
 
     <script src="/static/js/script.js"></script>
 </body>
