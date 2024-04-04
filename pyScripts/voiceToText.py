@@ -22,22 +22,22 @@ import whisper
 def generateTextFile(file_path):
     print("Converting...")
 
-    with open("textAndTime.txt", "w", encoding="UTF-8") as file:
-        file.write("文字+開始時間+結束時間。\n\n")
-    with open("textOnly.txt", "w", encoding="UTF-8") as file:
-        file.write("純文字。\n\n")
+    with open("./data/clips/textAndTime_1.txt", "w", encoding="UTF-8") as file:
+        file.write("文字+開始時間。\n\n")
+    # with open("textOnly.txt", "w", encoding="UTF-8") as file:
+    #     file.write("純文字。\n\n")
     
     result = voiceToText(file_path)
 
     for seg in result["segments"]:
         # print(seg["text"], round(seg["start"], 1), round(seg["end"], 1))
-        buffer = seg["text"] + " " + (str)(round(seg["start"], 1)) + " " + (str)(round(seg["end"], 1))
-        with open("textAndTime.txt", "a", encoding="UTF-8") as output_file:
+        buffer = seg["text"] + " " + (str)(round(seg["start"], 1))
+        with open("./data/clips/textAndTime_1.txt", "a", encoding="UTF-8") as output_file:
             output_file.write(buffer)
-            output_file.write('\n')
-    with open("textOnly.txt", "a", encoding="UTF-8") as output_file:
-        output_file.write(result["text"])
-        output_file.write('\n')
+            # output_file.write('\n')
+    # with open("textOnly.txt", "a", encoding="UTF-8") as output_file:
+    #     output_file.write(result["text"])
+    #     output_file.write('\n')
     
     print("Text writing completed...")
     # finish()
