@@ -2,7 +2,9 @@ from flask import Flask, request, send_file
 from flask import render_template
 import os
 
-from voiceToText import generateTextFile
+from pyScripts import generateTextFile
+from pyScripts import claude3api
+from pyScripts import split_txt
 
 app = Flask(__name__)
 
@@ -27,10 +29,11 @@ def upload_file():
 
         # 儲存檔案
         uploaded_file.save(file_path)
-
         generateTextFile(file_path)
-
         os.remove(file_path)
+
+        claude3api()
+        split_txt()
 
         return {'message': '上傳成功', 'file_path': file_path}
     else:
