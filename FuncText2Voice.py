@@ -4,6 +4,21 @@
 # typing-extensions==4.7.1
 # https://elevenlabs.io/docs/api-reference/text-to-speech
 
+# request floders:
+# data
+# data/video
+# data/ans
+# data/clips
+# data/audio
+# data/output
+
+# request files:
+# data/video/source.mp4
+# data/clips/question_part_?.txt
+# data/clips/summary_part_?.txt
+
+# request api: elevenlabs api
+
 # max 25 voice sample
 import os
 import requests
@@ -107,14 +122,14 @@ def VoiceCopy(numbers , key):
         summary_str = "".join(summary)
         question_str = "".join(question)
 
-        audio = generate(text=summary_str, voice=voice,model="eleven_multilingual_v2")
+        Gaudio1 = generate(text=summary_str, voice=voice,model="eleven_multilingual_v2")
 
-        save(audio,"./data/ans/Summary"+str(i)+".mp3")
+        save(Gaudio1,"./data/ans/Summary"+str(i)+".mp3")
         print("Summary "+str(i)+" successful !")
 
-        audio = generate(text=question_str, voice=voice,model="eleven_multilingual_v2")
+        Gaudio2 = generate(text=question_str, voice=voice,model="eleven_multilingual_v2")
 
-        save(audio,"./data/ans/Question"+str(i)+".mp3")
+        save(Gaudio2,"./data/ans/Question"+str(i)+".mp3")
         print("Question "+str(i)+" successful !")
 
     print("copy voice successful !")
