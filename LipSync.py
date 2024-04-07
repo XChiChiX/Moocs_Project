@@ -625,9 +625,14 @@ def crop_clips(mode='image'):
     
     print("crop_clips cost %d seconds\n" % (timeit.default_timer() - function_start_time))
     
-def concat_clips():
+def create_video_for_summary_and_questions(clip_num):
     """
-    根據模型輸出動作類別串接片段
+    生成總結與問題的影片
+    
+    參數
+    ---------------------
+    clip_num: 整數、字串
+        分割片段的編號
     """
     
     print("Start executing concat_clips")
@@ -643,164 +648,120 @@ def concat_clips():
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         
-    for clip in glob.glob(os.path.join(clips_path, '*.mp4')):
-        clip_name = os.path.basename(clip).split('.')[0]
+    if not os.path.exists(os.path.join(fake_audios_path, f"Summary{clip_num}.txt")) or not os.path.exists(os.path.join(fake_audios_path, f"Summary{clip_num}.mp3")) or not os.path.exists(os.path.join(fake_audios_path, f"Questions{clip_num}.txt")) or not os.path.exists(os.path.join(fake_audios_path, f"Questions{clip_num}.mp3")):
+        print(f'{clip_num}的總結問題的音檔及文字檔不存在')
+        return
+    
+    texts = pd.read_csv(os.path.join(fake_audios_path, f"Summary{clip_num}.txt"), sep=' ', header=None)
+    audio_segment = AudioSegment.from_mp3(os.path.join(fake_audios_path, f"Summary{clip_num}.mp3"))
+    
+    frame_count = 0
+    cap.release()
+    
+    writer = cv2.VideoWriter(os.path.join(concat_path, f"Summary{clip_num}.mp4"), cv2.VideoWriter_fourcc(*'mp4v'), fps, (width, height))
+    
+    for index, (sentence, start_time, end_time) in texts.iterrows():
         
-        if not os.path.exists(os.path.join(fake_audios_path, f"Summary{clip_name}.txt")) or not os.path.exists(os.path.join(fake_audios_path, f"Summary{clip_name}.mp3")):
-            print(f'無法處理{clip_name}的串接影片')
-            continue
+        # Wav2Vec2
+        audio_segment[start_time * 1000:end_time * 1000].export(os.path.join(data_path, "temp.mp3"), format="mp3")
+        audio_feature = feature_extractor(librosa.load(os.path.join(data_path, "temp.mp3"), sr=16000)[0], return_tensors="pt", padding="max_length", max_length=48000, truncation=True, sampling_rate=16000).to(device)
         
-        texts = pd.read_csv(os.path.join(fake_audios_path, f"Summary{clip_name}.txt"), sep=' ', header=None)
-        audio_segment = AudioSegment.from_mp3(os.path.join(fake_audios_path, f"Summary{clip_name}.mp3"))
+        # BERT
+        text_feature = tokenizer(sentence, padding='max_length', max_length=max_length, truncation=True, return_tensors="pt").to(device)
         
-        frame_count = 0
+        with torch.no_grad():
+            outputs = model(audio_feature["input_values"], text_feature["input_ids"], text_feature["attention_mask"])
+            
+        label = torch.argmax(outputs).item()
+        print(label)
+        
+        cap = cv2.VideoCapture(os.path.join(concat_source_path, f'{label}.mp4'))
+        
+        while cap.isOpened() and frame_count / fps < end_time:
+            ret, frame = cap.read()
+
+            if ret is False:
+                cap.release()
+                cap = cv2.VideoCapture(os.path.join(concat_source_path, '0.mp4'))
+                continue
+            
+            writer.write(frame)
+            last_frame = frame
+            frame_count += 1
+        
         cap.release()
         
-        writer = cv2.VideoWriter(os.path.join(concat_path, f"Summary{clip_name}.mp4"), cv2.VideoWriter_fourcc(*'mp4v'), fps, (width, height))
+    for i in range(int(fps)):
+        writer.write(last_frame)
         
-        # subclips_list = [glob.glob(os.path.join(subclips_path, os.path.basename(fake_audio).split('.')[0], str(i), "*.*")) for i in range(3)]
-        
-        for index, (sentence, start_time, end_time) in texts.iterrows():
-            
-            # Wav2Vec2
-            audio_segment[start_time * 1000:end_time * 1000].export(os.path.join(data_path, "temp.mp3"), format="mp3")
-            audio_feature = feature_extractor(librosa.load(os.path.join(data_path, "temp.mp3"), sr=16000)[0], return_tensors="pt", padding="max_length", max_length=48000, truncation=True, sampling_rate=16000).to(device)
-            
-            # BERT
-            text_feature = tokenizer(sentence, padding='max_length', max_length=max_length, truncation=True, return_tensors="pt").to(device)
-            
-            with torch.no_grad():
-                outputs = model(audio_feature["input_values"], text_feature["input_ids"], text_feature["attention_mask"])
-                
-            label = torch.argmax(outputs).item()
-            print(label)
-            
-            cap = cv2.VideoCapture(os.path.join(concat_source_path, f'{label}.mp4'))
-            
-            while cap.isOpened() and frame_count / fps < end_time:
-                ret, frame = cap.read()
+    writer.release()
     
-                if ret is False:
-                    cap.release()
-                    cap = cv2.VideoCapture(os.path.join(concat_source_path, '0.mp4'))
-                    continue
-                
-                writer.write(frame)
-                last_frame = frame
-                frame_count += 1
-            
-            cap.release()
-            
-            # 該類別沒有影片就找下一個機率最大的類別
-            # for class_num in outputs:
-            #     if len(subclips_list[class_num]) != 0:
-            #         movement_class = class_num.tolist()
-            #         break
-            
-            
-            # while frame_count / fps < end_time:
-            #     random_video = subclips_list[movement_class][random.randint(0, len(subclips_list[movement_class]) - 1)]
-                
-            #     cap = cv2.VideoCapture(random_video)
-                
-            #     while cap.isOpened() and frame_count / fps < end_time:
-            #         ret, frame = cap.read()
+    texts = pd.read_csv(os.path.join(fake_audios_path, f"Questions{clip_num}.txt"), sep=' ', header=None)
+    audio_segment = AudioSegment.from_mp3(os.path.join(fake_audios_path, f"Questions{clip_num}.mp3"))
     
-            #         if ret is False:
-            #             break
-                    
-            #         writer.write(frame)
-            #         frame_count = frame_count + 1
-                
-            #     cap.release()
-            
-        for i in range(int(fps)):
-            writer.write(last_frame)
-            
-        writer.release()
+    frame_count = 0
+    cap.release()
+    
+    writer = cv2.VideoWriter(os.path.join(concat_path, f"Questions{clip_num}.mp4"), cv2.VideoWriter_fourcc(*'mp4v'), fps, (width, height))
+    
+    for index, (sentence, start_time, end_time) in texts.iterrows():
         
-        texts = pd.read_csv(os.path.join(fake_audios_path, f"Questions{clip_name}.txt"), sep=' ', header=None)
-        audio_segment = AudioSegment.from_mp3(os.path.join(fake_audios_path, f"Questions{clip_name}.mp3"))
+        # Wav2Vec2
+        audio_segment[start_time * 1000:end_time * 1000].export(os.path.join(data_path, "temp.mp3"), format="mp3")
+        audio_feature = feature_extractor(librosa.load(os.path.join(data_path, "temp.mp3"), sr=16000)[0], return_tensors="pt", padding="max_length", max_length=60000, truncation=True, sampling_rate=16000).to(device)
         
-        frame_count = 0
+        # BERT
+        text_feature = tokenizer(sentence, padding='max_length', max_length=max_length, truncation=True, return_tensors="pt").to(device)
+        
+        with torch.no_grad():
+            outputs = model(audio_feature["input_values"], text_feature["input_ids"], text_feature["attention_mask"])
+            
+        label = torch.argmax(outputs).item()
+        print(label)
+        
+        cap = cv2.VideoCapture(os.path.join(concat_source_path, f'{label}.mp4'))
+        
+        while cap.isOpened() and frame_count / fps < end_time:
+            ret, frame = cap.read()
+
+            if ret is False:
+                cap.release()
+                cap = cv2.VideoCapture(os.path.join(concat_source_path, '0.mp4'))
+                continue
+            
+            writer.write(frame)
+            last_frame = frame
+            frame_count += 1
+        
         cap.release()
         
-        writer = cv2.VideoWriter(os.path.join(concat_path, f"Questions{clip_name}.mp4"), cv2.VideoWriter_fourcc(*'mp4v'), fps, (width, height))
+    for i in range(int(fps)):
+        writer.write(last_frame)
         
-        # subclips_list = [glob.glob(os.path.join(subclips_path, os.path.basename(fake_audio).split('.')[0], str(i), "*.*")) for i in range(3)]
-        
-        for index, (sentence, start_time, end_time) in texts.iterrows():
-            
-            # Wav2Vec2
-            audio_segment[start_time * 1000:end_time * 1000].export(os.path.join(data_path, "temp.mp3"), format="mp3")
-            audio_feature = feature_extractor(librosa.load(os.path.join(data_path, "temp.mp3"), sr=16000)[0], return_tensors="pt", padding="max_length", max_length=60000, truncation=True, sampling_rate=16000).to(device)
-            
-            # BERT
-            text_feature = tokenizer(sentence, padding='max_length', max_length=max_length, truncation=True, return_tensors="pt").to(device)
-            
-            with torch.no_grad():
-                outputs = model(audio_feature["input_values"], text_feature["input_ids"], text_feature["attention_mask"])
-                
-            label = torch.argmax(outputs).item()
-            print(label)
-            
-            cap = cv2.VideoCapture(os.path.join(concat_source_path, f'{label}.mp4'))
-            
-            while cap.isOpened() and frame_count / fps < end_time:
-                ret, frame = cap.read()
-    
-                if ret is False:
-                    cap.release()
-                    cap = cv2.VideoCapture(os.path.join(concat_source_path, '0.mp4'))
-                    continue
-                
-                writer.write(frame)
-                last_frame = frame
-                frame_count += 1
-            
-            cap.release()
-            
-            # 該類別沒有影片就找下一個機率最大的類別
-            # for class_num in outputs:
-            #     if len(subclips_list[class_num]) != 0:
-            #         movement_class = class_num.tolist()
-            #         break
-            
-            
-            # while frame_count / fps < end_time:
-            #     random_video = subclips_list[movement_class][random.randint(0, len(subclips_list[movement_class]) - 1)]
-                
-            #     cap = cv2.VideoCapture(random_video)
-                
-            #     while cap.isOpened() and frame_count / fps < end_time:
-            #         ret, frame = cap.read()
-    
-            #         if ret is False:
-            #             break
-                    
-            #         writer.write(frame)
-            #         frame_count = frame_count + 1
-                
-            #     cap.release()
-            
-        for i in range(int(fps)):
-            writer.write(last_frame)
-            
-        writer.release()
+    writer.release()
     
     if os.path.exists(os.path.join(data_path, "temp.mp3")):
         os.remove(os.path.join(data_path, "temp.mp3"))
         
     print("concat_clips cost %d second\n" % (timeit.default_timer() - function_start_time)) 
 
-def upload_files():
+def upload_files(clip_num):
     """
-    上傳concat clips跟fake audios至AWS S3
+    上傳假影片跟假音檔至AWS S3
+    
+    參數
+    ---------------------
+    clip_num: 整數、字串
+        分割片段的編號
     """
     
     print("Start executing upload_files")
     function_start_time = timeit.default_timer()
     logger = logging.getLogger(__name__)
+    
+    if not os.path.exists(os.path.join(concat_path, f"Summary{clip_num}.mp4")) or not os.path.exists(os.path.join(fake_audios_path, f"Summary{clip_num}.mp3")) or not os.path.exists(os.path.join(concat_path, f"Questions{clip_num}.mp4")) or not os.path.exists(os.path.join(fake_audios_path, f"Questions{clip_num}.mp3")):
+        print(f'{clip_num}的總結問題的影片及音檔不存在')
+        return
     
     class ObjectWrapper:
         def __init__(self, s3_object):
@@ -840,109 +801,107 @@ def upload_files():
     s3_resource = boto3.resource("s3")
     bucket = s3_resource.Bucket("goingcrazy")
     
-    for clip in glob.glob(os.path.join(clips_path, '*.mp4')):
-        clip_name = os.path.basename(clip).split('.')[0]
-        
-        if not os.path.exists(os.path.join(fake_audios_path, f"Summary{clip_name}.txt")) or not os.path.exists(os.path.join(fake_audios_path, f"Summary{clip_name}.mp3")):
-            continue
-        
-        obj_wrapper = ObjectWrapper(bucket.Object(f"Questions{clip_name}.mp3"))
-        obj_wrapper.put(os.path.join(fake_audios_path, f"Questions{clip_name}.mp3"))
-        
-        obj_wrapper = ObjectWrapper(bucket.Object(f'Questions{clip_name}.mp4'))
-        obj_wrapper.put(os.path.join(concat_path, f"Questions{clip_name}.mp4"))
-        
-        obj_wrapper = ObjectWrapper(bucket.Object(f"Summary{clip_name}.mp3"))
-        obj_wrapper.put(os.path.join(fake_audios_path, f"Summary{clip_name}.mp3"))
-        
-        obj_wrapper = ObjectWrapper(bucket.Object(f'Summary{clip_name}.mp4'))
-        obj_wrapper.put(os.path.join(concat_path, f"Summary{clip_name}.mp4"))
+    obj_wrapper = ObjectWrapper(bucket.Object(f"Questions{clip_num}.mp3"))
+    obj_wrapper.put(os.path.join(fake_audios_path, f"Questions{clip_num}.mp3"))
+    
+    obj_wrapper = ObjectWrapper(bucket.Object(f'Questions{clip_num}.mp4'))
+    obj_wrapper.put(os.path.join(concat_path, f"Questions{clip_num}.mp4"))
+    
+    obj_wrapper = ObjectWrapper(bucket.Object(f"Summary{clip_num}.mp3"))
+    obj_wrapper.put(os.path.join(fake_audios_path, f"Summary{clip_num}.mp3"))
+    
+    obj_wrapper = ObjectWrapper(bucket.Object(f'Summary{clip_num}.mp4'))
+    obj_wrapper.put(os.path.join(concat_path, f"Summary{clip_num}.mp4"))
     
     print("upload_files cost %d seconds\n" % (timeit.default_timer() - function_start_time))
     
-def synclabs_api():
+def synclabs_api(clip_num):
     """
     對Sync labs傳送API請求，1秒的對嘴影片要花費大約10秒
+        
+    參數
+    ---------------------
+    clip_num: 整數、字串
+        分割片段的編號
     """
     
     print("Start executing synclabs_api")
     function_start_time = timeit.default_timer()
-    
-    for clip in glob.glob(os.path.join(clips_path, '*.mp4')):
-        clip_name = os.path.basename(clip).split('.')[0]
-        
-        if not os.path.exists(os.path.join(fake_audios_path, f"Summary{clip_name}.txt")) or not os.path.exists(os.path.join(fake_audios_path, f"Summary{clip_name}.mp3")):
-            continue
-    
-        payload = {
-            "audioUrl": f"https://goingcrazy.s3.ap-northeast-1.amazonaws.com/Questions{clip_name}.mp3",
-            "model": "sync-1.6.0",
-            "synergize": True,
-            "videoUrl": f"https://goingcrazy.s3.ap-northeast-1.amazonaws.com/Questions{clip_name}.mp4"
-        }
-        
-        headers = {
-            "x-api-key": "ae2d3598-ff37-49ad-9aec-4640fedacf3e",
-            "Content-Type": "application/json"
-        }
-        
-        # 送出請求
-        url = "https://api.synclabs.so/lipsync"
-        response = requests.request("POST", url, json=payload, headers=headers)
-        
-        ID = json.loads(response.text).get('id')
-        url = f"https://api.synclabs.so/lipsync/{ID}"
-        headers = {"x-api-key": "ae2d3598-ff37-49ad-9aec-4640fedacf3e"}
-        done = False
-        
-        # 等待請求完成
-        while not done:
-            response = requests.request("GET", url, headers=headers)
-            
-            print(json.loads(response.text))
-            
-            if json.loads(response.text).get('status') == 'COMPLETED':
-                url_link = json.loads(response.text)['url']
-                urllib.request.urlretrieve(url_link, os.path.join(synclabs_path, f'Questions{clip_name}.mp4'))
-                done = True
-                
-        payload = {
-            "audioUrl": f"https://goingcrazy.s3.ap-northeast-1.amazonaws.com/Summary{clip_name}.mp3",
-            "model": "sync-1.6.0",
-            "synergize": True,
-            "videoUrl": f"https://goingcrazy.s3.ap-northeast-1.amazonaws.com/Summary{clip_name}.mp4"
-        }
-        
-        headers = {
-            "x-api-key": "ae2d3598-ff37-49ad-9aec-4640fedacf3e",
-            "Content-Type": "application/json"
-        }
-        
-        # 送出請求
-        url = "https://api.synclabs.so/lipsync"
-        response = requests.request("POST", url, json=payload, headers=headers)
 
-        ID = json.loads(response.text).get('id')
-        url = f"https://api.synclabs.so/lipsync/{ID}"
-        headers = {"x-api-key": "ae2d3598-ff37-49ad-9aec-4640fedacf3e"}
-        done = False
+    payload = {
+        "audioUrl": f"https://goingcrazy.s3.ap-northeast-1.amazonaws.com/Questions{clip_num}.mp3",
+        "model": "sync-1.6.0",
+        "synergize": True,
+        "videoUrl": f"https://goingcrazy.s3.ap-northeast-1.amazonaws.com/Questions{clip_num}.mp4"
+    }
+    
+    headers = {
+        "x-api-key": "ae2d3598-ff37-49ad-9aec-4640fedacf3e",
+        "Content-Type": "application/json"
+    }
+    
+    # 送出請求
+    url = "https://api.synclabs.so/lipsync"
+    response = requests.request("POST", url, json=payload, headers=headers)
+    
+    ID = json.loads(response.text).get('id')
+    url = f"https://api.synclabs.so/lipsync/{ID}"
+    headers = {"x-api-key": "ae2d3598-ff37-49ad-9aec-4640fedacf3e"}
+    done = False
+    
+    # 等待請求完成
+    while not done:
+        response = requests.request("GET", url, headers=headers)
         
-        # 等待請求完成
-        while not done:
-            response = requests.request("GET", url, headers=headers)
+        print(json.loads(response.text))
+        
+        if json.loads(response.text).get('status') == 'COMPLETED':
+            url_link = json.loads(response.text)['url']
+            urllib.request.urlretrieve(url_link, os.path.join(synclabs_path, f'Questions{clip_num}.mp4'))
+            done = True
             
-            print(json.loads(response.text))
-            
-            if json.loads(response.text).get('status') == 'COMPLETED':
-                url_link = json.loads(response.text)['url']
-                urllib.request.urlretrieve(url_link, os.path.join(synclabs_path, f'Summary{clip_name}.mp4'))
-                done = True
+    payload = {
+        "audioUrl": f"https://goingcrazy.s3.ap-northeast-1.amazonaws.com/Summary{clip_num}.mp3",
+        "model": "sync-1.6.0",
+        "synergize": True,
+        "videoUrl": f"https://goingcrazy.s3.ap-northeast-1.amazonaws.com/Summary{clip_num}.mp4"
+    }
+    
+    headers = {
+        "x-api-key": "ae2d3598-ff37-49ad-9aec-4640fedacf3e",
+        "Content-Type": "application/json"
+    }
+    
+    # 送出請求
+    url = "https://api.synclabs.so/lipsync"
+    response = requests.request("POST", url, json=payload, headers=headers)
+
+    ID = json.loads(response.text).get('id')
+    url = f"https://api.synclabs.so/lipsync/{ID}"
+    headers = {"x-api-key": "ae2d3598-ff37-49ad-9aec-4640fedacf3e"}
+    done = False
+    
+    # 等待請求完成
+    while not done:
+        response = requests.request("GET", url, headers=headers)
+        
+        print(json.loads(response.text))
+        
+        if json.loads(response.text).get('status') == 'COMPLETED':
+            url_link = json.loads(response.text)['url']
+            urllib.request.urlretrieve(url_link, os.path.join(synclabs_path, f'Summary{clip_num}.mp4'))
+            done = True
             
     print("synclabs_api cost %d seconds\n" % (timeit.default_timer() - function_start_time))
     
-def delete_files():
+def delete_files(clip_num):
     """
-    從S3刪除上傳的檔案
+    刪除上傳Amazon S3的檔案
+        
+    參數
+    ---------------------
+    clip_num: 整數、字串
+        分割片段的編號
     """
     
     print("Start executing delete_files")
@@ -973,77 +932,77 @@ def delete_files():
 
     s3_resource = boto3.resource("s3")
     bucket = s3_resource.Bucket("goingcrazy")
+        
+    obj_wrapper = ObjectWrapper(bucket.Object(f"Questions{clip_num}.mp3"))
+    obj_wrapper.delete()
     
-    for clip in glob.glob(os.path.join(clips_path, '*.mp4')) + glob.glob(os.path.join(clips_path, '*.mkv')):
-        clip_name = os.path.basename(clip).split('.')[0]
-        
-        if not os.path.exists(os.path.join(fake_audios_path, f"Summary{clip_name}.txt")) or not os.path.exists(os.path.join(fake_audios_path, f"Summary{clip_name}.mp3")):
-            continue
-        
-        obj_wrapper = ObjectWrapper(bucket.Object(f"Questions{clip_name}.mp3"))
-        obj_wrapper.delete()
-        
-        obj_wrapper = ObjectWrapper(bucket.Object(f'Questions{clip_name}.mp4'))
-        obj_wrapper.delete()
-        
-        obj_wrapper = ObjectWrapper(bucket.Object(f"Summary{clip_name}.mp3"))
-        obj_wrapper.delete()
-        
-        obj_wrapper = ObjectWrapper(bucket.Object(f'Summary{clip_name}.mp4'))
-        obj_wrapper.delete()
+    obj_wrapper = ObjectWrapper(bucket.Object(f'Questions{clip_num}.mp4'))
+    obj_wrapper.delete()
+    
+    obj_wrapper = ObjectWrapper(bucket.Object(f"Summary{clip_num}.mp3"))
+    obj_wrapper.delete()
+    
+    obj_wrapper = ObjectWrapper(bucket.Object(f'Summary{clip_num}.mp4'))
+    obj_wrapper.delete()
     
     print("delete_files cost %d seconds\n" % (timeit.default_timer() - function_start_time))
 
-def add_subtitles():
+def add_subtitles(clip_num):
     """
     添加字幕
+        
+    參數
+    ---------------------
+    clip_num: 整數、字串
+        分割片段的編號
     """
     
     print("Start executing add_subtitles")
     function_start_time = timeit.default_timer()
     generator = lambda txt: TextClip(txt, font='Microsoft-JhengHei-Bold-&-Microsoft-JhengHei-UI-Bold', fontsize=90, color='white', stroke_color="black", stroke_width=2)
+        
+    if not os.path.exists(os.path.join(synclabs_path, f"Summary{clip_num}.mp4")) or not os.path.exists(os.path.join(synclabs_path, f"Questions{clip_num}.mp4")):
+        print(f'{clip_num}的對嘴影片不存在')
+        return
     
-    for clip in glob.glob(os.path.join(clips_path, '*.mp4')) + glob.glob(os.path.join(clips_path, '*.mkv')):
-        clip_name = os.path.basename(clip).split('.')[0]
-        
-        if not os.path.exists(os.path.join(fake_audios_path, f"Summary{clip_name}.txt")) or not os.path.exists(os.path.join(fake_audios_path, f"Summary{clip_name}.mp3")):
-            continue
-        
-        subs = [((0, 2), '測試字幕')]
-        
-        subtitles = SubtitlesClip(subs, generator)
-        video = VideoFileClip(os.path.join(synclabs_path, f"Summary{clip_name}.mp4"))
-        result = CompositeVideoClip([video,  subtitles.set_pos(('center', 950))])
-        result.write_videofile(os.path.join(subtitle_added_path, f"Summary{clip_name}.mp4"), logger=None)
-        
-        subs = [((0, 2), '測試字幕')]
-        
-        subtitles = SubtitlesClip(subs, generator)
-        video = VideoFileClip(os.path.join(synclabs_path, f"Questions{clip_name}.mp4"))
-        result = CompositeVideoClip([video,  subtitles.set_pos(('center', 950))])
-        result.write_videofile(os.path.join(subtitle_added_path, f"Questions{clip_name}.mp4"), logger=None)
+    subs = [((0, 2), '測試字幕')]
+    
+    subtitles = SubtitlesClip(subs, generator)
+    video = VideoFileClip(os.path.join(synclabs_path, f"Summary{clip_num}.mp4"))
+    result = CompositeVideoClip([video,  subtitles.set_pos(('center', 950))])
+    result.write_videofile(os.path.join(subtitle_added_path, f"Summary{clip_num}.mp4"), logger=None)
+    
+    subs = [((0, 2), '測試字幕')]
+    
+    subtitles = SubtitlesClip(subs, generator)
+    video = VideoFileClip(os.path.join(synclabs_path, f"Questions{clip_num}.mp4"))
+    result = CompositeVideoClip([video,  subtitles.set_pos(('center', 950))])
+    result.write_videofile(os.path.join(subtitle_added_path, f"Questions{clip_num}.mp4"), logger=None)
         
     print("add_subtitles cost %d seconds\n" % (timeit.default_timer() - function_start_time))
     
-def concat_results():
+def concat_results(clip_num):
     """
     串接切割片段、Questions、Summary
+        
+    參數
+    ---------------------
+    clip_num: 整數、字串
+        分割片段的編號
     """
     
     print("Start executing concat_results")
     function_start_time = timeit.default_timer()
     
-    for clip in glob.glob(os.path.join(clips_path, '*.mp4')) + glob.glob(os.path.join(clips_path, '*.mkv')):
-        clip_name = os.path.basename(clip).split('.')[0]
+    if not os.path.exists(os.path.join(clips_path, f"{clip_num}.mp4")) or not os.path.exists(os.path.join(subtitle_added_path, f"Summary{clip_num}.mp4")) or not os.path.exists(os.path.join(subtitle_added_path, f"Questions{clip_num}.mp4")):
+        print(f'{clip_num}的對嘴影片、分割片段不存在')
+        return
         
-        if not os.path.exists(os.path.join(fake_audios_path, f"Summary{clip_name}.txt")) or not os.path.exists(os.path.join(fake_audios_path, f"Summary{clip_name}.mp3")):
-            continue
-        
-        video = VideoFileClip(os.path.join(clips_path, f"{clip_name}.mp4"))
-        summary = VideoFileClip(os.path.join(subtitle_added_path, f"Summary{clip_name}.mp4"))
-        questions = VideoFileClip(os.path.join(subtitle_added_path, f"Questions{clip_name}.mp4"))
-        result = concatenate_videoclips([video, summary, questions])
-        result.write_videofile(os.path.join(results_path, f"{clip_name}.mp4"), logger=None)
+    video = VideoFileClip(os.path.join(clips_path, f"{clip_num}.mp4"))
+    summary = VideoFileClip(os.path.join(subtitle_added_path, f"Summary{clip_num}.mp4"))
+    questions = VideoFileClip(os.path.join(subtitle_added_path, f"Questions{clip_num}.mp4"))
+    result = concatenate_videoclips([video, summary, questions])
+    result.write_videofile(os.path.join(results_path, f"{clip_num}.mp4"), logger=None)
             
     print("concat_results cost %d seconds\n" % (timeit.default_timer() - function_start_time))
         
@@ -1092,36 +1051,69 @@ subtitle_added_path = r'./data/subtitle_added'
 # 資料的路徑
 data_path = r"./data"
 
-device = 'cuda' if torch.cuda.is_available() else 'cpu'
-num_epoch = 20
-learning_rate = 1e-5
-dropout = 0.2
-batch_size = 32
-max_length = 30
-label_smoothing = 0.1
-num_labels = 5
-method = "Kmeans" # [Kmeans, Equal]
-show_cm = True  
-
-same_seeds(1)
-# voice_to_text(r"C:\Users\Owner\Desktop\Moocs_Project\data\ans\Summary1.mp3")
-# extract_subclips()
-# mp4_to_mp3()
-# compute_subclips_finger_movement()
-# label_subclips(num_labels=num_labels, method=method)
-for seed in range(10):
-    same_seeds(seed + 1)
-    print(f'Seed: {seed + 1}')
-    train()
-# video_to_images()
-# crop_clips(mode='video')
-# process_animateanyone(r"C:\Users\Owner\Desktop\Moore-AnimateAnyone-master\output\source_0_768x768_3_1353.mp4")
-# test()
-
-# concat_clips()
-# upload_files()
-# synclabs_api()
-# delete_files()
-# add_subtitles()
-# concat_results()
+if __name__ == "__main__":
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    num_epoch = 20
+    learning_rate = 1e-5
+    dropout = 0.2
+    batch_size = 32
+    max_length = 30
+    label_smoothing = 0.1
+    num_labels = 5
+    method = "Kmeans" # [Kmeans, Equal]
+    show_cm = True  
+    
+    same_seeds(1)
+    # voice_to_text(r"C:\Users\Owner\Desktop\Moocs_Project\data\ans\Summary1.mp3")
+    # extract_subclips()
+    # mp4_to_mp3()
+    # compute_subclips_finger_movement()
+    # label_subclips(num_labels=num_labels, method=method)
+    print(f'lr:{learning_rate}, ls:{label_smoothing}, bs:{batch_size}')
+    for seed in range(10):
+        same_seeds(seed + 1)
+        print(f'Seed: {seed + 1}')
+        train()
+    
+    batch_size = 16
+    label_smoothing = 0.0
+    print(f'lr:{learning_rate}, ls:{label_smoothing}, bs:{batch_size}')
+    for seed in range(10):
+        same_seeds(seed + 1)
+        print(f'Seed: {seed + 1}')
+        train()
+        
+    label_smoothing = 0.1
+    print(f'lr:{learning_rate}, ls:{label_smoothing}, bs:{batch_size}')
+    for seed in range(10):
+        same_seeds(seed + 1)
+        print(f'Seed: {seed + 1}')
+        train()
+    
+    learning_rate = 5e-5
+    label_smoothing = 0.0
+    print(f'lr:{learning_rate}, ls:{label_smoothing}, bs:{batch_size}')
+    for seed in range(10):
+        same_seeds(seed + 1)
+        print(f'Seed: {seed + 1}')
+        train()
+        
+    label_smoothing = 0.1
+    print(f'lr:{learning_rate}, ls:{label_smoothing}, bs:{batch_size}')
+    for seed in range(10):
+        same_seeds(seed + 1)
+        print(f'Seed: {seed + 1}')
+        train()
+    # video_to_images()
+    # crop_clips(mode='video')
+    # process_animateanyone(r"C:\Users\Owner\Desktop\Moore-AnimateAnyone-master\output\source_0_768x768_3_1353.mp4")
+    # test()
+    
+    # 下方為生成影片主要步驟
+    # create_video_for_summary_and_questions(1)
+    # upload_files(1)
+    # synclabs_api(1)
+    # delete_files(1)
+    # add_subtitles(1)
+    # concat_results(1)
 
