@@ -633,6 +633,14 @@ def create_video_for_summary_and_questions(clip_num):
     ---------------------
     clip_num: 整數、字串
         分割片段的編號
+        
+    檔案需求
+    ---------------------
+    ./data/ans/Summary{clip_num}.txt
+    ./data/ans/Summary{clip_num}.mp3
+    ./data/ans/Questions{clip_num}.txt
+    ./data/ans/Questions{clip_num}.mp3
+    ./checkpoints/{checkpoint_name}
     """
     
     print("Start executing concat_clips")
@@ -753,6 +761,13 @@ def upload_files(clip_num):
     ---------------------
     clip_num: 整數、字串
         分割片段的編號
+        
+    檔案需求
+    ---------------------
+    ./data/ans/Summary{clip_num}.mp3
+    ./data/ans/Summary{clip_num}.mp4
+    ./data/ans/Questions{clip_num}.mp3
+    ./data/ans/Questions{clip_num}.mp4
     """
     
     print("Start executing upload_files")
@@ -951,6 +966,11 @@ def add_subtitles(clip_num):
     ---------------------
     clip_num: 整數、字串
         分割片段的編號
+        
+    檔案需求
+    ---------------------
+    ./data/sync_labs/Summary{clip_num}.mp4
+    ./data/sync_labs/Questions{clip_num}.mp4
     """
     
     print("Start executing add_subtitles")
@@ -987,6 +1007,12 @@ def concat_results(clip_num):
     ---------------------
     clip_num: 整數、字串
         分割片段的編號
+        
+    檔案需求
+    ---------------------
+    ./data/sync_labs/Summary{clip_num}.mp4
+    ./data/sync_labs/Questions{clip_num}.mp4
+    ./data/clips/{clip_num}.mp4
     """
     
     print("Start executing concat_results")
