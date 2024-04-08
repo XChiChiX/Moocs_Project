@@ -853,8 +853,6 @@ def synclabs_api(clip_num):
     while not done:
         response = requests.request("GET", url, headers=headers)
         
-        print(json.loads(response.text))
-        
         if json.loads(response.text).get('status') == 'COMPLETED':
             url_link = json.loads(response.text)['url']
             urllib.request.urlretrieve(url_link, os.path.join(synclabs_path, f'Questions{clip_num}.mp4'))
@@ -884,8 +882,6 @@ def synclabs_api(clip_num):
     # 等待請求完成
     while not done:
         response = requests.request("GET", url, headers=headers)
-        
-        print(json.loads(response.text))
         
         if json.loads(response.text).get('status') == 'COMPLETED':
             url_link = json.loads(response.text)['url']
@@ -959,20 +955,22 @@ def add_subtitles(clip_num):
     
     print("Start executing add_subtitles")
     function_start_time = timeit.default_timer()
-    generator = lambda txt: TextClip(txt, font='Microsoft-JhengHei-Bold-&-Microsoft-JhengHei-UI-Bold', fontsize=90, color='white', stroke_color="black", stroke_width=2)
+    generator = lambda txt: TextClip(txt, font='Microsoft-JhengHei-Bold-&-Microsoft-JhengHei-UI-Bold', fontsize=80, color='white', stroke_color="black", stroke_width=2)
         
     if not os.path.exists(os.path.join(synclabs_path, f"Summary{clip_num}.mp4")) or not os.path.exists(os.path.join(synclabs_path, f"Questions{clip_num}.mp4")):
         print(f'{clip_num}的對嘴影片不存在')
         return
     
-    subs = [((0, 2), '測試字幕')]
+    texts = pd.read_csv(os.path.join(fake_audios_path, f"Summary{clip_num}.txt"), sep=' ', header=None)
+    subs = [((start_time, end_time), text) for index, (text, start_time, end_time) in texts.iterrows()]
     
     subtitles = SubtitlesClip(subs, generator)
     video = VideoFileClip(os.path.join(synclabs_path, f"Summary{clip_num}.mp4"))
     result = CompositeVideoClip([video,  subtitles.set_pos(('center', 950))])
     result.write_videofile(os.path.join(subtitle_added_path, f"Summary{clip_num}.mp4"), logger=None)
     
-    subs = [((0, 2), '測試字幕')]
+    texts = pd.read_csv(os.path.join(fake_audios_path, f"Questions{clip_num}.txt"), sep=' ', header=None)
+    subs = [((start_time, end_time), text) for index, (text, start_time, end_time) in texts.iterrows()]
     
     subtitles = SubtitlesClip(subs, generator)
     video = VideoFileClip(os.path.join(synclabs_path, f"Questions{clip_num}.mp4"))
@@ -1054,11 +1052,11 @@ data_path = r"./data"
 if __name__ == "__main__":
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     num_epoch = 20
-    learning_rate = 1e-5
+    learning_rate = 5e-6
     dropout = 0.2
     batch_size = 32
     max_length = 30
-    label_smoothing = 0.1
+    label_smoothing = 0.0
     num_labels = 5
     method = "Kmeans" # [Kmeans, Equal]
     show_cm = True  
@@ -1069,41 +1067,10 @@ if __name__ == "__main__":
     # mp4_to_mp3()
     # compute_subclips_finger_movement()
     # label_subclips(num_labels=num_labels, method=method)
-    print(f'lr:{learning_rate}, ls:{label_smoothing}, bs:{batch_size}')
-    for seed in range(10):
-        same_seeds(seed + 1)
-        print(f'Seed: {seed + 1}')
-        train()
-    
-    batch_size = 16
-    label_smoothing = 0.0
-    print(f'lr:{learning_rate}, ls:{label_smoothing}, bs:{batch_size}')
-    for seed in range(10):
-        same_seeds(seed + 1)
-        print(f'Seed: {seed + 1}')
-        train()
-        
-    label_smoothing = 0.1
-    print(f'lr:{learning_rate}, ls:{label_smoothing}, bs:{batch_size}')
-    for seed in range(10):
-        same_seeds(seed + 1)
-        print(f'Seed: {seed + 1}')
-        train()
-    
-    learning_rate = 5e-5
-    label_smoothing = 0.0
-    print(f'lr:{learning_rate}, ls:{label_smoothing}, bs:{batch_size}')
-    for seed in range(10):
-        same_seeds(seed + 1)
-        print(f'Seed: {seed + 1}')
-        train()
-        
-    label_smoothing = 0.1
-    print(f'lr:{learning_rate}, ls:{label_smoothing}, bs:{batch_size}')
-    for seed in range(10):
-        same_seeds(seed + 1)
-        print(f'Seed: {seed + 1}')
-        train()
+    # for seed in range(10):
+    #     same_seeds(seed + 1)
+    #     print(f'Seed: {seed + 1}')
+    #     train()
     # video_to_images()
     # crop_clips(mode='video')
     # process_animateanyone(r"C:\Users\Owner\Desktop\Moore-AnimateAnyone-master\output\source_0_768x768_3_1353.mp4")
@@ -1114,6 +1081,6 @@ if __name__ == "__main__":
     # upload_files(1)
     # synclabs_api(1)
     # delete_files(1)
-    # add_subtitles(1)
+    add_subtitles(1)
     # concat_results(1)
 
