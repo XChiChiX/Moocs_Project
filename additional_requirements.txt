@@ -1,0 +1,3 @@
+前往Pytorch官網下載cuda版本的torch
+安裝ffmpeg並新增至環境變數
+安裝imagemagick，安裝時勾選install legacy utilities
