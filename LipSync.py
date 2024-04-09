@@ -15,9 +15,6 @@ import urllib.request
 import boto3
 from botocore.exceptions import ClientError
 import logging
-from transparent_background import Remover
-from PIL import Image
-import numpy as np
     
 class Wav2Vec2BertClassifier(nn.Module):
     """
@@ -315,6 +312,12 @@ def synclabs_api(clip_num):
             url_link = json.loads(response.text)['url']
             urllib.request.urlretrieve(url_link, os.path.join(synclabs_path, f'Questions{clip_num}.mp4'))
             done = True
+        elif json.loads(response.text).get('status') == 'REJECTED':
+            print('餘額不足請充值')
+            done = True
+        elif json.loads(response.text).get('status') == 'FAILED':
+            print('對嘴失敗')
+            done = True
             
     payload = {
         "audioUrl": f"https://goingcrazy.s3.ap-northeast-1.amazonaws.com/Summary{clip_num}.mp3",
@@ -344,6 +347,12 @@ def synclabs_api(clip_num):
         if json.loads(response.text).get('status') == 'COMPLETED':
             url_link = json.loads(response.text)['url']
             urllib.request.urlretrieve(url_link, os.path.join(synclabs_path, f'Summary{clip_num}.mp4'))
+            done = True
+        elif json.loads(response.text).get('status') == 'REJECTED':
+            print('餘額不足請充值')
+            done = True
+        elif json.loads(response.text).get('status') == 'FAILED':
+            print('對嘴失敗')
             done = True
             
     print("synclabs_api cost %d seconds\n" % (timeit.default_timer() - function_start_time))
