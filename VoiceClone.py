@@ -214,6 +214,9 @@ def DataCheck(key):
             if(os.path.exists('./data/clips/summary_part_'+str(i)+'.txt') == False):
                 Frieren = False
                 break
+            if(os.path.exists('./data/clips/question_part_'+str(i)+'.txt') == False):
+                Frieren = False
+                break
         if(Frieren):
             return 1
         else:
