@@ -1,7 +1,7 @@
 # pip install moviepy
 # pip install pydub
-# pip install elevenlabs
-# typing-extensions==4.7.1
+# pip install elevenlabs == 0.2.26
+# typing-extensions == 4.7.1
 # https://elevenlabs.io/docs/api-reference/text-to-speech
 
 # request floders:
@@ -28,6 +28,7 @@ from moviepy.editor import *
 from pydub import AudioSegment
 import math
 import random
+import json
 
 def CountParagraphs():
     # Define the directory path
@@ -191,6 +192,9 @@ def DataCheck(key):
     elif(os.path.isdir("./data") == False):
         print("./data not found !")
         return 0
+    elif(os.path.isdir("./key.json") == False):
+        print("key.json not found !")
+        return 0
     elif(os.path.isdir("./data/video") == False):
         print("./data/video not found !")
         return 0
@@ -223,11 +227,15 @@ def DataCheck(key):
             return 0
     
 
-def VoiceClone():
-
-    ElevenLabsAPI = ""
+def VoiceClone():    
 
     if(DataCheck(ElevenLabsAPI) == 1):
+
+        jsonFile = open('./key.json','r')
+        a = json.load(jsonFile)
+
+        ElevenLabsAPI = a["elevenlabs_api_key"]
+
         VoiceCopy(ElevenLabsAPI)
 
 #VoiceClone()
