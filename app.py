@@ -5,6 +5,10 @@ import os
 from pyScripts import generateTextFile
 from pyScripts import claude3api
 from pyScripts import split_txt
+from pyScripts import splitVideo
+from VoiceClone import VoiceClone
+import CloneVoiceStamps
+from LipSync import create_video_for_summary_and_questions, upload_files_to_s3, synclabs_api, delete_files_from_s3, add_subtitles, concat_results
 
 app = Flask(__name__)
 
@@ -28,12 +32,21 @@ def upload_file():
         print("48763 ", file_path)
 
         # 儲存檔案
-        uploaded_file.save(file_path)
-        generateTextFile(file_path)
-        os.remove(file_path)
+        # uploaded_file.save(file_path)
+        # generateTextFile(file_path)
+        # os.remove(file_path)
 
-        claude3api()
-        split_txt()
+        # claude3api()
+        # split_txt()
+        # splitVideo.split_video(uploaded_file.filename)
+        # VoiceClone()
+        # CloneVoiceStamps.start()
+        # create_video_for_summary_and_questions()
+        # upload_files_to_s3()
+        # synclabs_api()
+        # delete_files_from_s3()
+        # add_subtitles()
+        # concat_results()
 
         return {'message': '上傳成功', 'file_path': file_path}
     else:

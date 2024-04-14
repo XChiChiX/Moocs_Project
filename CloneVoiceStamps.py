@@ -33,7 +33,7 @@ def start():
 
         Summary_path = "./data/ans/Summary"+str(i)+".txt"
 
-        f = open(Summary_path,"w")
+        f = open(Summary_path,"w", encoding='UTF-8')
 
         for segment in result["segments"]:
             f.write(segment['text'].replace(' ', '')+" "+(str)(round(segment['start'], 2))+" "+(str)(round(segment['end'], 2)))#float/float/str
@@ -47,7 +47,7 @@ def start():
 
         Question_path = "./data/ans/Question"+str(i)+".txt"
 
-        f = open(Question_path,"w")
+        f = open(Question_path,"w", encoding='UTF-8')
 
         for segment in result["segments"]:
             f.write(segment['text'].replace(' ', '')+" "+(str)(round(segment['start'], 2))+" "+(str)(round(segment['end'], 2)))#float/float/str

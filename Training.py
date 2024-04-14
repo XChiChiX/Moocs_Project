@@ -9,9 +9,10 @@ from ultralytics import YOLO
 import cv2
 import torch
 from torch import nn
-from torch.utils.data import Dataset, DataLoader, random_split
+from torch.utils.data import Dataset, DataLoader, random_split, WeightedRandomSampler
 from torch.optim import Adam
 import whisper
+import transformers
 from transformers import Wav2Vec2FeatureExtractor, Wav2Vec2Model, BertTokenizer, BertModel
 import numpy as np
 import librosa
@@ -28,6 +29,8 @@ from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 from sklearn.utils.class_weight import compute_class_weight
 import matplotlib.pyplot as plt
 from tqdm import tqdm
+from transformers.utils import logging
+logging.set_verbosity(transformers.logging.ERROR)
 
 def same_seeds(seed):
     """
@@ -306,6 +309,12 @@ class CustomDataset(Dataset):
         self.audio_names = [name.split('.')[0] + ".mp3" for name in self.subclips_info["file_name"]]
         self.features = [self.feature_extractor(librosa.load(os.path.join(subclips_path, "unclassified_audio", name), sr=16000)[0], return_tensors="pt", padding="max_length", max_length=60000, truncation=True, sampling_rate=16000) for name in self.audio_names]
         self.labels = [label for label in self.subclips_info["label"]]
+        
+        self.label_count = {}
+        for label in self.labels:
+            if self.label_count.get(label) is None:
+                self.label_count[label] = 0
+            self.label_count[label] += 1
 
     def __len__(self):
         return len(self.labels)
@@ -318,7 +327,7 @@ class Wav2Vec2BertClassifier(nn.Module):
     Model for deciding the magnitude of movement according to text and audio.
     """
     
-    def __init__(self, num_labels, dropout=0.2):
+    def __init__(self, num_labels):
         super(Wav2Vec2BertClassifier, self).__init__()
         # Wav2vec2
         self.wav2vec2 = Wav2Vec2Model.from_pretrained("facebook/wav2vec2-base")
@@ -363,7 +372,7 @@ class Wav2Vec2BertClassifier(nn.Module):
 
         return logits
     
-def train():
+def train(mode):
     """
     訓練模型
     """
@@ -380,17 +389,44 @@ def train():
     class_weights = compute_class_weight('balanced', classes=np.unique(y), y=y)
     class_weights = torch.tensor(class_weights, dtype=torch.float).to(device)
     
-    model = Wav2Vec2BertClassifier(num_labels, dropout=dropout).to(device)
+    model = Wav2Vec2BertClassifier(num_labels).to(device)
     optimizer = Adam(model.parameters(), lr=learning_rate)
-    criterion = nn.CrossEntropyLoss(weight=class_weights, label_smoothing=label_smoothing)
+    criterion = nn.CrossEntropyLoss(weight=class_weights)
     dataset = CustomDataset(subclips_path, max_length=max_length)
-    train_set, val_set, test_set = random_split(dataset, [0.7, 0.1, 0.2])
     
-    train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True)
-    val_loader = DataLoader(val_set, batch_size=batch_size, shuffle=False)
-    test_loader = DataLoader(test_set, batch_size=batch_size, shuffle=False)
+    train_set, val_set, test_set = random_split(dataset, [0.6, 0.2, 0.2])
     
-    model = Wav2Vec2BertClassifier(num_labels, dropout=dropout).to(device)
+    if mode == 'oversampling':
+        train_label_count = {i : 0 for i in range(num_labels)}
+        train_sample_weights = []
+        
+        for item in train_set:
+            train_label_count[item[2]] += 1
+            
+        for item in train_set:
+            train_sample_weights.append(1 / train_label_count[item[2]])
+        
+        train_indices = WeightedRandomSampler(train_sample_weights, max(train_label_count.values()) * num_labels, replacement=True)
+        train_loader = DataLoader(train_set, sampler=train_indices, batch_size=batch_size)
+    elif mode == 'undersampling':
+        train_label_count = {i : 0 for i in range(num_labels)}
+        train_sample_weights = []
+        
+        for item in train_set:
+            train_label_count[item[2]] += 1
+            
+        for item in train_set:
+            train_sample_weights.append(1 / train_label_count[item[2]])
+        
+        train_indices = WeightedRandomSampler(train_sample_weights, min(train_label_count.values()) * num_labels, replacement=False)
+        train_loader = DataLoader(train_set, sampler=train_indices, batch_size=batch_size)
+    elif mode == 'normal':
+        train_indices = train_set
+        train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True)
+    val_loader = DataLoader(val_set, batch_size=batch_size)
+    test_loader = DataLoader(test_set, batch_size=batch_size)
+    
+    model = Wav2Vec2BertClassifier(num_labels).to(device)
     optimizer = Adam(model.parameters(), lr=learning_rate)
     
     best_acc = -1.0
@@ -403,7 +439,7 @@ def train():
         
         # Training
         model.train()
-        for texts, audios, labels in train_loader: # tqdm(train_loader):
+        for texts, audios, labels in tqdm(train_loader):
             input_wav2vec2 = audios["input_values"].squeeze(1).to(device)
             input_bert = texts["input_ids"].squeeze(1).to(device)
             mask_bert = texts["attention_mask"].squeeze(1).to(device)
@@ -423,7 +459,7 @@ def train():
         # Validation
         model.eval()
         with torch.no_grad():
-            for texts, audios, labels in val_loader: # tqdm(val_loader):
+            for texts, audios, labels in tqdm(val_loader):
                 input_wav2vec2 = audios["input_values"].squeeze(1).to(device)
                 input_bert = texts["input_ids"].squeeze(1).to(device)
                 mask_bert = texts["attention_mask"].squeeze(1).to(device)
@@ -437,7 +473,7 @@ def train():
                 val_acc += (val_pred.cpu() == labels.cpu()).sum().item()
                 val_loss += loss.item()
                 
-        # print(f'[{epoch+1:03d}/{num_epoch:03d}] Train Acc: {train_acc/len(train_set):3.5f} Loss: {train_loss/len(train_loader):3.5f} | Val Acc: {val_acc/len(val_set):3.5f} Loss: {val_loss/len(val_loader):3.5f}')
+        print(f'[{epoch+1:03d}/{num_epoch:03d}] Train Acc: {train_acc/len(train_indices):3.5f} Loss: {train_loss/len(train_loader):3.5f} | Val Acc: {val_acc/len(val_set):3.5f} Loss: {val_loss/len(val_loader):3.5f}')
 
         if val_acc > best_acc:
             
@@ -447,7 +483,7 @@ def train():
                 
             best_acc = val_acc
             torch.save({"model_state_dict":model.state_dict()}, os.path.join(checkpoints_path, f"checkpoint_{best_acc/len(val_set):.5f}.pt"))
-            # print(f'saving model with acc {best_acc/len(val_set):.5f}')
+            print(f'saving model with acc {best_acc/len(val_set):.5f}')
 
     # Test
     y_pred = []
@@ -457,7 +493,7 @@ def train():
     model.load_state_dict(torch.load(os.path.join(checkpoints_path, f"checkpoint_{best_acc/len(val_set):.5f}.pt"))['model_state_dict'])
     model.eval()
     with torch.no_grad():
-        for texts, audios, labels in test_loader: # tqdm(test_loader):
+        for texts, audios, labels in tqdm(test_loader):
             input_wav2vec2 = audios["input_values"].squeeze(1).to(device)
             input_bert = texts["input_ids"].squeeze(1).to(device)
             mask_bert = texts["attention_mask"].squeeze(1).to(device)
@@ -473,16 +509,15 @@ def train():
             test_acc += (test_pred.cpu() == labels.cpu()).sum().item()
             test_loss += loss.item()
             
-    if show_cm:
-        # cm = confusion_matrix(y_true, y_pred)
-        # disp = ConfusionMatrixDisplay(confusion_matrix=cm)
-        # disp.plot()
-        # plt.show()
-        
-        cm = confusion_matrix(y_true, y_pred, normalize='true')
-        disp = ConfusionMatrixDisplay(confusion_matrix=cm)
-        disp.plot()
-        plt.show()
+    cm = confusion_matrix(y_true, y_pred)
+    disp = ConfusionMatrixDisplay(confusion_matrix=cm)
+    disp.plot()
+    plt.show()
+    
+    cm = confusion_matrix(y_true, y_pred, normalize='true')
+    disp = ConfusionMatrixDisplay(confusion_matrix=cm)
+    disp.plot()
+    plt.show()
     
     # 刪除上一個pt檔
     if os.path.exists(os.path.join(checkpoints_path, f'checkpoint_{best_acc/len(val_set):.5f}.pt')):
@@ -528,7 +563,6 @@ def process_animateanyone(path):
     function_start_time = timeit.default_timer()
     video_name = os.path.basename(path)
     cap = cv2.VideoCapture(path)
-    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     fps = cap.get(cv2.CAP_PROP_FPS)
     writer = None
     remover = Remover(mode="base", jit=True, device="cuda:0")
@@ -539,10 +573,6 @@ def process_animateanyone(path):
         if ret is False:
             break
         
-        # 取出影片右方三分之一的部分
-        frame = frame[:, int(width // 3 * 2):, :]
-        frame = cv2.resize(frame, (512, 512), cv2.INTER_LANCZOS4)
-        
         # Padding至1920x1080
         frame = cv2.copyMakeBorder(frame, 1080 - frame.shape[0], 0, 1920 - frame.shape[1], 0, cv2.BORDER_CONSTANT, value=[255, 255, 255])
         
@@ -551,7 +581,7 @@ def process_animateanyone(path):
         frame = np.array(remover.process(frame, type="white"))
 
         if writer == None:
-            writer = cv2.VideoWriter(os.path.join(data_path, f'processed_{video_name}'), cv2.VideoWriter_fourcc(*'mp4v'), fps, (512, 512))
+            writer = cv2.VideoWriter(os.path.join(data_path, f'processed_{video_name}'), cv2.VideoWriter_fourcc(*'mp4v'), fps, (1920, 1080))
 
         writer.write(frame)
     
@@ -624,6 +654,13 @@ def crop_clips(path, mode='image'):
     
     print("crop_clips cost %d seconds\n" % (timeit.default_timer() - function_start_time))
     
+def test():
+    """
+    測試用函數
+    """
+    
+    pass
+    
 # 切割後片段的路徑
 clips_path = r"./data/clips"
 
@@ -664,82 +701,35 @@ data_path = r"./data"
 
 if __name__ == "__main__":
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    num_epoch = 20
+    num_epoch = 10
     learning_rate = 1e-5
     dropout = 0.2
     batch_size = 32
     max_length = 30
-    label_smoothing = 0.0
     num_labels = 5
-    method = "Kmeans" # [Kmeans, Equal]
-    show_cm = True  
+    method = "Kmeans" # [Kmeans, Equal] 
     
-    same_seeds(1)
+    same_seeds(10)
     # voice_to_text(r"./data\clips\1.mp4")
     # extract_subclips(r"C:\Users\Owner\Desktop\Project\data\clips\1.mp4")
     # mp4_to_mp3()
     # compute_subclips_finger_movement()
     # label_subclips(num_labels=num_labels, method=method)
     
-    # print(f'lr: {learning_rate}, bs: {batch_size}, ls: {label_smoothing}')
-    # for seed in range(10):
-    #     same_seeds(seed + 1)
-    #     print(f'Seed: {seed + 1}')
-    #     train()
-    
-    # label_smoothing = 0.1
-    # print(f'lr: {learning_rate}, bs: {batch_size}, ls: {label_smoothing}')
-    # for seed in range(10):
-    #     same_seeds(seed + 1)
-    #     print(f'Seed: {seed + 1}')
-    #     train()
+    # label (1232 total)
+    # 0    289
+    # 1    378
+    # 2    294
+    # 3    208
+    # 4     63
         
-    # label_smoothing = 0.0
-    # learning_rate = 5e-5
-    # print(f'lr: {learning_rate}, bs: {batch_size}, ls: {label_smoothing}')
+    # print(f'learning rate: {learning_rate}, batch size: {batch_size}')
     # for seed in range(10):
     #     same_seeds(seed + 1)
     #     print(f'Seed: {seed + 1}')
-    #     train()
-        
-    # label_smoothing = 0.1
-    # print(f'lr: {learning_rate}, bs: {batch_size}, ls: {label_smoothing}')
-    # for seed in range(10):
-    #     same_seeds(seed + 1)
-    #     print(f'Seed: {seed + 1}')
-    #     train()
-        
-    # label_smoothing = 0.0
-    # learning_rate = 5e-6
-    # print(f'lr: {learning_rate}, bs: {batch_size}, ls: {label_smoothing}')
-    # for seed in range(10):
-    #     same_seeds(seed + 1)
-    #     print(f'Seed: {seed + 1}')
-    #     train()
-        
-    # label_smoothing = 0.1
-    # print(f'lr: {learning_rate}, bs: {batch_size}, ls: {label_smoothing}')
-    # for seed in range(10):
-    #     same_seeds(seed + 1)
-    #     print(f'Seed: {seed + 1}')
-    #     train()
-        
-    # label_smoothing = 0.0
-    # learning_rate = 1e-6
-    # print(f'lr: {learning_rate}, bs: {batch_size}, ls: {label_smoothing}')
-    # for seed in range(10):
-    #     same_seeds(seed + 1)
-    #     print(f'Seed: {seed + 1}')
-    #     train()
-        
-    # label_smoothing = 0.1
-    # print(f'lr: {learning_rate}, bs: {batch_size}, ls: {label_smoothing}')
-    # for seed in range(10):
-    #     same_seeds(seed + 1)
-    #     print(f'Seed: {seed + 1}')
-    #     train()
+    #     train(mode='normal')
     
     # video_to_images()
-    # crop_clips(r'', mode='video')
-    # process_animateanyone(r"C:\Users\Owner\Desktop\Moore-AnimateAnyone-master\output\source_4_768x768_3_0233.mp4")
+    # crop_clips(r'./data/crop/5.mp4', mode='video')
+    # process_animateanyone(r"C:\Users\Owner\Desktop\Moore-AnimateAnyone-master\output\5.mp4")
     # test()

@@ -1,16 +1,18 @@
 from moviepy.editor import VideoFileClip
+import os
 
 def split_video(input_video):
     clip = VideoFileClip(input_video)
     total = clip.duration
-
+    video_name = input_video.split('.')[0]
+    
     start_times = get_start_times()
     print(start_times)
     end_times = [start_times[1], start_times[2], total]  # 结束时间列表，单位为秒
     
     for i, (start_time, end_time) in enumerate(zip(start_times, end_times)):
         sub_clip = clip.subclip(start_time, end_time)
-        output_file = f"./data/clips/{input_video}_part_{i+1}.mp4"
+        output_file = f"./data/clips/{video_name}_part_{i+1}.mp4"
         sub_clip.write_videofile(output_file, codec="libx264")
 
     clip.close()
