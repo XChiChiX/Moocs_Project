@@ -29,6 +29,7 @@ from pydub import AudioSegment
 import math
 import random
 import json
+import shutil
 
 def CountParagraphs():
     # Define the directory path
@@ -207,24 +208,36 @@ def DataCheck(key):
     elif(CountParagraphs() <= 0):
         return 0
     else:
-        if(os.path.isdir("./data/ans") == False):
-            os.mkdir("./data/ans")
-        if(os.path.isdir("./data/output") == False):
-            os.mkdir("./data/output")
-        if(os.path.isdir("./data/audio") == False):
-            os.mkdir("./data/audio")
-        Frieren = True
-        for i in range(1 , CountParagraphs() + 1):
-            if(os.path.exists('./data/clips/summary_part_'+str(i)+'.txt') == False):
-                Frieren = False
+        exit = 0
+        files = os.listdir("./data/clips")
+        for file in files:
+             if (file.endswith('.mp4') and 'part' in file):
+                shutil.copyfile("./data/clips/"+file, "./data/video/source.mp4")
+                exit = 1
                 break
-            if(os.path.exists('./data/clips/question_part_'+str(i)+'.txt') == False):
-                Frieren = False
-                break
-        if(Frieren):
-            return 1
+        if(exit == 1):
+            if(os.path.isdir("./data/ans") == False):
+                os.mkdir("./data/ans")
+            if(os.path.isdir("./data/output") == False):
+                os.mkdir("./data/output")
+            if(os.path.isdir("./data/audio") == False):
+                os.mkdir("./data/audio")
+            Frieren = True
+            for i in range(1 , CountParagraphs() + 1):
+                if(os.path.exists('./data/clips/summary_part_'+str(i)+'.txt') == False):
+                    Frieren = False
+                    break
+                if(os.path.exists('./data/clips/question_part_'+str(i)+'.txt') == False):
+                    Frieren = False
+                    break
+            if(Frieren):
+                return 1
+            else:
+                return 0
         else:
+            print("./data/clips/.mp4 not found !")
             return 0
+                
     
 
 def VoiceClone():    
