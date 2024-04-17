@@ -4,7 +4,7 @@ import os
 def split_video(input_video):
     clip = VideoFileClip(input_video)
     total = clip.duration
-    video_name = input_video.split('.')[0]
+    # video_name = input_video.split('.')[0]
     
     start_times = get_start_times()
     print(start_times)
@@ -12,7 +12,7 @@ def split_video(input_video):
     
     for i, (start_time, end_time) in enumerate(zip(start_times, end_times)):
         sub_clip = clip.subclip(start_time, end_time)
-        output_file = f"./data/clips/{video_name}_part_{i+1}.mp4"
+        output_file = f"./data/clips/{i+1}.mp4"
         sub_clip.write_videofile(output_file, codec="libx264")
 
     clip.close()
