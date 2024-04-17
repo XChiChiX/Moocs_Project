@@ -134,8 +134,6 @@ def VoiceCopy(key):
 
     for i in range(1 , CountParagraphs() +1 ):
 
-        print(str(i)+" : \n")
-
         with open('./data/clips/question_part_'+str(i)+'.txt', 'r', encoding='utf-8') as q_file:
             question = q_file.readlines()
 
@@ -152,12 +150,12 @@ def VoiceCopy(key):
         save(Gaudio1,"./data/ans/Summary"+str(i)+".mp3")
         print("Summary "+str(i)+" successful !")
 
-        Gaudio2 = generate(text=question_str, voice=voice,model="eleven_multilingual_v2")
+        Gaudio2 = generate(text="接下來請同學回答下列幾個問題:"+question_str, voice=voice,model="eleven_multilingual_v2")
 
         save(Gaudio2,"./data/ans/Question"+str(i)+".mp3")
         print("Question "+str(i)+" successful !")
 
-    print("copy voice successful !")
+    print("make voice successful !")
 
     # delete
 
@@ -187,37 +185,34 @@ def VoiceCopy(key):
         print(response.text)
 
 def DataCheck(key):
-    if(key == ""):
-        print("ElevenLabsAPI not found !")
-        return 0
-    elif(os.path.isdir("./data") == False):
-        print("./data not found !")
-        return 0
-    elif(os.path.isdir("./key.json") == False):
-        print("key.json not found !")
-        return 0
-    elif(os.path.isdir("./data/video") == False):
-        print("./data/video not found !")
-        return 0
-    elif(os.path.isdir("./data/clips") == False):
-        print("./data/clips not found !")
-        return 0
-    elif(os.path.exists('./data/video/source.mp4') == False):
-        print("./data/video/source.mp4 not found !")
-        return 0
-    elif(CountParagraphs() <= 0):
-        return 0
-    else:
-        exit = 0
-        files = os.listdir("./data/clips")
-        for file in files:
-             if (file.endswith('.mp4') and 'part' in file):
-                shutil.copyfile("./data/clips/"+file, "./data/video/source.mp4")
-                exit = 1
-                break
-        if(exit == 1):
+    exit = 0
+    files = os.listdir("./data/clips")
+    for file in files:
+        if (file.endswith('.mp4') and 'part' in file):
+            shutil.copyfile("./data/clips/"+file, "./data/video/source.mp4")
+            exit = 1
+        break
+    if(exit == 1):
+        if(key == ""):
+            print("ElevenLabsAPI not found !")
+            return 0
+        elif(os.path.isdir("./data") == False):
+            print("./data not found !")
+            return 0
+        elif(os.path.isdir("./data/video") == False):
+            print("./data/video not found !")
+            return 0
+        elif(os.path.isdir("./data/clips") == False):
+            print("./data/clips not found !")
+            return 0
+        elif(os.path.exists('./data/video/source.mp4') == False):
+            print("./data/video/source.mp4 not found !")
+            return 0
+        elif(CountParagraphs() <= 0):
+            return 0
+        else:        
             if(os.path.isdir("./data/ans") == False):
-                os.mkdir("./data/ans")
+                    os.mkdir("./data/ans")
             if(os.path.isdir("./data/output") == False):
                 os.mkdir("./data/output")
             if(os.path.isdir("./data/audio") == False):
@@ -234,21 +229,23 @@ def DataCheck(key):
                 return 1
             else:
                 return 0
-        else:
-            print("./data/clips/.mp4 not found !")
-            return 0
+    else:        
+        print("./data/clips/.mp4 not found !")
+        return 0
                 
     
 
 def VoiceClone():    
 
-    if(DataCheck(ElevenLabsAPI) == 1):
-
+    if(os.path.exists("./key.json")):
         jsonFile = open('./key.json','r')
         a = json.load(jsonFile)
-
         ElevenLabsAPI = a["elevenlabs_api_key"]
 
-        VoiceCopy(ElevenLabsAPI)
+        if(DataCheck(ElevenLabsAPI) == 1):    
+            VoiceCopy(ElevenLabsAPI)
+    else:
+        print("./key.json not found !")
 
-#VoiceClone()
+if __name__ == '__main__':
+    VoiceClone()
