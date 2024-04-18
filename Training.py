@@ -167,10 +167,11 @@ def compute_subclips_finger_movement():
     options = vision.HandLandmarkerOptions(base_options=base_options, num_hands=2)
     detector = vision.HandLandmarker.create_from_options(options)
     
+    yolo = YOLO(r'./checkpoints/yolov8x-pose-p6.pt')
+    
     subclips_info = pd.read_csv(os.path.join(subclips_path, "subclips_info.csv"))
     
-    for index, (clip_name, sentence) in subclips_info.iterrows():
-        print("\r開始測量%s的食指移動量" % clip_name, end='')
+    for index, (clip_name, sentence, _, _) in subclips_info.iterrows():
         cap = cv2.VideoCapture(os.path.join(subclips_path, "unclassified", clip_name))
         fps = cap.get(cv2.CAP_PROP_FPS)
         total_frame = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -178,12 +179,17 @@ def compute_subclips_finger_movement():
         movement = 0
         last_left_index_finger = None
         last_right_index_finger = None
+        shoulder_width = 0
         
         while cap.isOpened():
             ret, frame = cap.read()
 
             if ret is False:
                 break
+            
+            if shoulder_width == 0:
+                result = yolo(frame, verbose=False)[0]
+                shoulder_width = torch.sqrt(torch.sum(torch.square(result.keypoints.xy[0][5] - result.keypoints.xy[0][6]))).item()
             
             # 用MediaPipe函式庫讀取當前的frame
             cv2.imwrite(os.path.join(data_path, 'temp.png'), frame)
@@ -222,7 +228,7 @@ def compute_subclips_finger_movement():
         cap.release()
         
         # 紀錄食指每秒平均移動量
-        subclips_info.loc[index, "avg_movement"] = movement / length
+        subclips_info.loc[index, "avg_movement"] = movement / length / shoulder_width
         
     if os.path.exists(os.path.join(data_path, 'temp.png')):
         os.remove(os.path.join(data_path, 'temp.png'))
@@ -333,12 +339,10 @@ class Wav2Vec2BertClassifier(nn.Module):
         self.wav2vec2 = Wav2Vec2Model.from_pretrained("facebook/wav2vec2-base")
         self.wav2vec2.freeze_feature_encoder()
         self.layer_weights_wav2vec2 = nn.Parameter(torch.ones(13))
-        self.layernorm_wav2vec2 = nn.LayerNorm(768)
         
         # BERT
         self.bert = BertModel.from_pretrained('bert-base-chinese')
         self.layer_weights_bert = nn.Parameter(torch.ones(12))
-        self.layernorm_bert = nn.LayerNorm(768)
 
         # Late fusion
         self.classifier = nn.Linear(1536, num_labels)
@@ -351,14 +355,12 @@ class Wav2Vec2BertClassifier(nn.Module):
         layers_output_wav2vec2 = torch.stack(layers_output_wav2vec2, dim=1)
         norm_weights_wav2vec2 = nn.functional.softmax(self.layer_weights_wav2vec2, dim=-1)
         output_wav2vec2 = (layers_output_wav2vec2 * norm_weights_wav2vec2.view(-1, 1, 1)).sum(dim=1)
-        output_wav2vec2 = self.layernorm_wav2vec2(output_wav2vec2)
         
         # BERT embeddings
         layers_output_bert = self.bert(input_ids=input_bert, attention_mask=mask_bert,return_dict=True, output_hidden_states=True)
         layers_output_bert = torch.stack(layers_output_bert['hidden_states'][1:])
         norm_weights_bert = nn.functional.softmax(self.layer_weights_bert, dim=-1)
         output_bert = (layers_output_bert * norm_weights_bert.view(-1, 1, 1, 1)).sum(dim=0)
-        output_bert = self.layernorm_bert(output_bert)
         
         # Global Average
         output_wav2vec2 = torch.mean(output_wav2vec2, dim=1)
@@ -396,7 +398,7 @@ def train(mode):
     
     train_set, val_set, test_set = random_split(dataset, [0.6, 0.2, 0.2])
     
-    if mode == 'oversampling':
+    if mode == 'balance':
         train_label_count = {i : 0 for i in range(num_labels)}
         train_sample_weights = []
         
@@ -406,9 +408,16 @@ def train(mode):
         for item in train_set:
             train_sample_weights.append(1 / train_label_count[item[2]])
         
-        train_indices = WeightedRandomSampler(train_sample_weights, max(train_label_count.values()) * num_labels, replacement=True)
+        train_indices = WeightedRandomSampler(train_sample_weights, len(train_set), replacement=True)
+        
+        print('Before balanced: ', train_label_count)
+        train_label_count = {i : 0 for i in range(num_labels)}
+        for index in train_indices:
+            train_label_count[train_set[index][2]] += 1
+        print('After balanced: ', train_label_count)
+        
         train_loader = DataLoader(train_set, sampler=train_indices, batch_size=batch_size)
-    elif mode == 'undersampling':
+    elif mode == 'undersample':
         train_label_count = {i : 0 for i in range(num_labels)}
         train_sample_weights = []
         
@@ -419,8 +428,19 @@ def train(mode):
             train_sample_weights.append(1 / train_label_count[item[2]])
         
         train_indices = WeightedRandomSampler(train_sample_weights, min(train_label_count.values()) * num_labels, replacement=False)
+        
+        print('Before balanced: ', train_label_count)
+        train_label_count = {i : 0 for i in range(num_labels)}
+        for index in train_indices:
+            train_label_count[train_set[index][2]] += 1
+        print('After balanced: ', train_label_count)
+        
         train_loader = DataLoader(train_set, sampler=train_indices, batch_size=batch_size)
     elif mode == 'normal':
+        train_label_count = {i : 0 for i in range(num_labels)}
+        for item in train_set:
+            train_label_count[item[2]] += 1
+        print(train_label_count)
         train_indices = train_set
         train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True)
     val_loader = DataLoader(val_set, batch_size=batch_size)
@@ -708,8 +728,9 @@ if __name__ == "__main__":
     max_length = 30
     num_labels = 5
     method = "Kmeans" # [Kmeans, Equal] 
+    mode = 'normal' # [normal, balance]
     
-    same_seeds(10)
+    same_seeds(1)
     # voice_to_text(r"./data\clips\1.mp4")
     # extract_subclips(r"C:\Users\Owner\Desktop\Project\data\clips\1.mp4")
     # mp4_to_mp3()
@@ -717,19 +738,26 @@ if __name__ == "__main__":
     # label_subclips(num_labels=num_labels, method=method)
     
     # label (1232 total)
-    # 0    289
-    # 1    378
-    # 2    294
-    # 3    208
-    # 4     63
+    # 0    315
+    # 1    436
+    # 2    302
+    # 3    138
+    # 4     41
         
-    # print(f'learning rate: {learning_rate}, batch size: {batch_size}')
-    # for seed in range(10):
-    #     same_seeds(seed + 1)
-    #     print(f'Seed: {seed + 1}')
-    #     train(mode='normal')
+    print(f'learning rate: {learning_rate}, batch size: {batch_size}, mode: {mode}')
+    for seed in range(10):
+        same_seeds(seed + 1)
+        print(f'Seed: {seed + 1}')
+        train(mode=mode)
+        
+    learning_rate = 5e-5
+    print(f'learning rate: {learning_rate}, batch size: {batch_size}, mode: {mode}')
+    for seed in range(10):
+        same_seeds(seed + 1)
+        print(f'Seed: {seed + 1}')
+        train(mode=mode)
     
     # video_to_images()
-    # crop_clips(r'./data/crop/5.mp4', mode='video')
+    # crop_clips(r"C:\Users\Owner\Desktop\Project\data\crop\0.jpg", mode='image')
     # process_animateanyone(r"C:\Users\Owner\Desktop\Moore-AnimateAnyone-master\output\5.mp4")
     # test()

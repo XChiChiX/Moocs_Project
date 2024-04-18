@@ -1,5 +1,6 @@
 import whisper
 import os
+import glob
 
 def CountParagraphs():
     # Define the directory path
@@ -22,7 +23,7 @@ def CountParagraphs():
             count += 1
 
     # Print the number of files that contain the keyword
-    return count
+    return len(glob.glob('./data/ans/Summary*.mp3'))
 
 def start():
     model = whisper.load_model("base")

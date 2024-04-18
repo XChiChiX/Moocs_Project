@@ -46,12 +46,10 @@ class Wav2Vec2BertClassifier(nn.Module):
         self.wav2vec2 = Wav2Vec2Model.from_pretrained("facebook/wav2vec2-base")
         self.wav2vec2.freeze_feature_encoder()
         self.layer_weights_wav2vec2 = nn.Parameter(torch.ones(13))
-        self.layernorm_wav2vec2 = nn.LayerNorm(768)
         
         # BERT
         self.bert = BertModel.from_pretrained('bert-base-chinese')
         self.layer_weights_bert = nn.Parameter(torch.ones(12))
-        self.layernorm_bert = nn.LayerNorm(768)
 
         # Late fusion
         self.classifier = nn.Linear(1536, num_labels)
@@ -64,14 +62,12 @@ class Wav2Vec2BertClassifier(nn.Module):
         layers_output_wav2vec2 = torch.stack(layers_output_wav2vec2, dim=1)
         norm_weights_wav2vec2 = nn.functional.softmax(self.layer_weights_wav2vec2, dim=-1)
         output_wav2vec2 = (layers_output_wav2vec2 * norm_weights_wav2vec2.view(-1, 1, 1)).sum(dim=1)
-        output_wav2vec2 = self.layernorm_wav2vec2(output_wav2vec2)
         
         # BERT embeddings
         layers_output_bert = self.bert(input_ids=input_bert, attention_mask=mask_bert,return_dict=True, output_hidden_states=True)
         layers_output_bert = torch.stack(layers_output_bert['hidden_states'][1:])
         norm_weights_bert = nn.functional.softmax(self.layer_weights_bert, dim=-1)
         output_bert = (layers_output_bert * norm_weights_bert.view(-1, 1, 1, 1)).sum(dim=0)
-        output_bert = self.layernorm_bert(output_bert)
         
         # Global Average
         output_wav2vec2 = torch.mean(output_wav2vec2, dim=1)
@@ -108,7 +104,6 @@ def create_video_for_summary_and_questions():
     cap = cv2.VideoCapture(os.path.join(concat_source_path, '0.mp4'))
     fps = cap.get(cv2.CAP_PROP_FPS)
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     clip_num = 1
         
@@ -298,21 +293,19 @@ def synclabs_api():
     
     print("Start executing synclabs_api")
     function_start_time = timeit.default_timer()
-    api_key = 'f6c7857b-e17c-4894-903c-33059ccd9fac'
-    clip_num = 1
-    model_name = 'wav2lip++' # sync-1.6.0 / wav2lip++
+    clip_num = 2
     
     while os.path.exists(os.path.join(concat_path, f"Summary{clip_num}.mp4")) and os.path.exists(os.path.join(fake_audios_path, f"Summary{clip_num}.mp3")) and os.path.exists(os.path.join(concat_path, f"Question{clip_num}.mp4")) and os.path.exists(os.path.join(fake_audios_path, f"Question{clip_num}.mp3")):
 
         payload = {
             "audioUrl": f"https://goingcrazy.s3.ap-northeast-1.amazonaws.com/Question{clip_num}.mp3",
-            "model": model_name,
+            "model": "wav2lip++",
             "synergize": True,
             "videoUrl": f"https://goingcrazy.s3.ap-northeast-1.amazonaws.com/Question{clip_num}.mp4"
         }
         
         headers = {
-            "x-api-key": api_key,
+            "x-api-key": "f6c7857b-e17c-4894-903c-33059ccd9fac",
             "Content-Type": "application/json"
         }
         
@@ -322,7 +315,7 @@ def synclabs_api():
         
         ID = json.loads(response.text).get('id')
         url = f"https://api.synclabs.so/lipsync/{ID}"
-        headers = {"x-api-key": api_key}
+        headers = {"x-api-key": "79e5c520-433f-433f-adba-6bb9e4be2fbb"}
         done = False
         
         # 等待請求完成
@@ -332,6 +325,7 @@ def synclabs_api():
             if json.loads(response.text).get('status') == 'COMPLETED':
                 url_link = json.loads(response.text)['url']
                 urllib.request.urlretrieve(url_link, os.path.join(synclabs_path, f'Question{clip_num}.mp4'))
+                print(f'Question{clip_num}.mp4 completed')
                 done = True
             elif json.loads(response.text).get('status') == 'REJECTED':
                 print('餘額不足請充值')
@@ -342,13 +336,13 @@ def synclabs_api():
                 
         payload = {
             "audioUrl": f"https://goingcrazy.s3.ap-northeast-1.amazonaws.com/Summary{clip_num}.mp3",
-            "model": model_name,
+            "model": "wav2lip++",
             "synergize": True,
             "videoUrl": f"https://goingcrazy.s3.ap-northeast-1.amazonaws.com/Summary{clip_num}.mp4"
         }
         
         headers = {
-            "x-api-key": api_key,
+            "x-api-key": "f6c7857b-e17c-4894-903c-33059ccd9fac",
             "Content-Type": "application/json"
         }
         
@@ -358,7 +352,7 @@ def synclabs_api():
     
         ID = json.loads(response.text).get('id')
         url = f"https://api.synclabs.so/lipsync/{ID}"
-        headers = {"x-api-key": api_key}
+        headers = {"x-api-key": "79e5c520-433f-433f-adba-6bb9e4be2fbb"}
         done = False
         
         # 等待請求完成
@@ -368,6 +362,7 @@ def synclabs_api():
             if json.loads(response.text).get('status') == 'COMPLETED':
                 url_link = json.loads(response.text)['url']
                 urllib.request.urlretrieve(url_link, os.path.join(synclabs_path, f'Summary{clip_num}.mp4'))
+                print(f'Summary{clip_num}.mp4 completed')
                 done = True
             elif json.loads(response.text).get('status') == 'REJECTED':
                 print('餘額不足請充值')
@@ -505,11 +500,7 @@ def concat_results():
         
         video = VideoFileClip(os.path.join(clips_path, f"{clip_num}.mp4"))
         summary = VideoFileClip(os.path.join(subtitle_added_path, f"Summary{clip_num}.mp4"))
-        summary.audio = summary.audio.set_start(0.3)
-        summary = summary.set_end(summary.duration -0.3)
         questions = VideoFileClip(os.path.join(subtitle_added_path, f"Question{clip_num}.mp4"))
-        questions.audio = questions.audio.set_start(0.3)
-        questions = questions.set_end(questions.duration -0.3)
         result = concatenate_videoclips([video, summary, questions])
         result.write_videofile(os.path.join(results_path, f"{clip_num}.mp4"), logger=None)
         
@@ -530,7 +521,7 @@ subclips_path = r"./data/subclips"
 checkpoints_path = r"./checkpoints"
 
 # 模型參數的讀取路徑
-checkpoint_name = "checkpoint_0.38211_0.41870_simple.pt"
+checkpoint_name = "checkpoint_0.36179_0.43496_simple.pt"
 
 # 最終成果的路徑
 results_path = r"./data/results"
@@ -562,10 +553,9 @@ same_seeds(1)
 if __name__ == "__main__":
     pass
     # 下方為生成影片主要步驟
-    # create_video_for_summary_and_questions(1)
-    # upload_files_to_s3(1)
-    # synclabs_api(1)
-    # delete_files_from_s3(1)
-    # add_subtitles(1)
-    # concat_results(1)
-
+    # create_video_for_summary_and_questions()
+    # upload_files_to_s3()
+    # synclabs_api()
+    # delete_files_from_s3()
+    # add_subtitles()
+    # concat_results()

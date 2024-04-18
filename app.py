@@ -38,7 +38,7 @@ def upload_file():
 
         # claude3api()
         # split_txt()
-        # splitVideo.split_video(uploaded_file.filename)
+        # splitVideo.split_video(file_path)
         # VoiceClone()
         # CloneVoiceStamps.start()
         # create_video_for_summary_and_questions()

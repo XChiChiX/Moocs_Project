@@ -30,13 +30,14 @@ import math
 import random
 import json
 import shutil
+import glob
 
 def CountParagraphs():
     # Define the directory path
     directory_path = './data/clips'
 
     # Define the keyword
-    keyword = 'summary_part_'
+    keyword = '' # 'summary_part_'
 
     # Initialize a counter for the files that contain the keyword
     count = 0
@@ -52,7 +53,7 @@ def CountParagraphs():
             count += 1
 
     # Print the number of files that contain the keyword
-    return count
+    return len(glob.glob('./data/clips/*.mp4'))
 
 def VoiceCopy(key):
 
@@ -188,7 +189,7 @@ def DataCheck(key):
     exit = 0
     files = os.listdir("./data/clips")
     for file in files:
-        if (file.endswith('.mp4') and 'part' in file):
+        if (file.endswith('.mp4')):
             shutil.copyfile("./data/clips/"+file, "./data/video/source.mp4")
             exit = 1
         break
