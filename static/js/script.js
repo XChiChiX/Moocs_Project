@@ -33,12 +33,13 @@ startBtn.addEventListener("click", () => {
 downloadBtns.forEach(downloadBtn => {
     downloadBtn.style.display = "none";
     downloadBtn.addEventListener("click", () => {
-        if(downloadBtn.id == "DL-btn1"){
-            fileName = "textOnly.txt";
-        }
-        else {
-            fileName = "textAndTime.txt";
-        }
+        // if(downloadBtn.id == "DL-btn1"){
+        //     fileName = "textOnly.txt";
+        // }
+        // else {
+        //     fileName = "textAndTime.txt";
+        // }
+        fileName = "result.zip";
         fetch(`/api/download/${fileName}`, {
             method: 'POST',
         })
