@@ -129,9 +129,6 @@ def create_video_for_summary_and_questions():
                 outputs = model(audio_feature["input_values"], text_feature["input_ids"], text_feature["attention_mask"])
                 
             label = torch.argmax(outputs).item()
-            # outputs = nn.functional.softmax(outputs.detach().cpu()[0])
-            # outputs = [(i / sum(outputs)).item() for i in outputs]
-            # label = random.choices(list(range(num_labels)), weights=outputs)[0]
             print(label)
             
             cap = cv2.VideoCapture(os.path.join(concat_source_path, f'{label}.mp4'))
@@ -176,9 +173,6 @@ def create_video_for_summary_and_questions():
                 outputs = model(audio_feature["input_values"], text_feature["input_ids"], text_feature["attention_mask"])
                 
             label = torch.argmax(outputs).item()
-            # outputs = nn.functional.softmax(outputs.detach().cpu()[0])
-            # outputs = [(i / sum(outputs)).item() for i in outputs]
-            # label = random.choices(list(range(num_labels)), weights=outputs)[0]
             print(label)
             
             cap = cv2.VideoCapture(os.path.join(concat_source_path, f'{label}.mp4'))
@@ -500,11 +494,7 @@ def concat_results():
         
         video = VideoFileClip(os.path.join(clips_path, f"{clip_num}.mp4"))
         summary = VideoFileClip(os.path.join(subtitle_added_path, f"Summary{clip_num}.mp4"))
-        summary.audio = summary.audio.set_start(0.35)
-        summary = summary.set_end(summary.duration -0.35)
         questions = VideoFileClip(os.path.join(subtitle_added_path, f"Question{clip_num}.mp4"))
-        questions.audio = questions.audio.set_start(0.1)
-        questions = questions.set_end(questions.duration -0.1)
         result = concatenate_videoclips([video, summary, questions])
         result.write_videofile(os.path.join(results_path, f"{clip_num}.mp4"), logger=None)
         
@@ -525,7 +515,7 @@ subclips_path = r"./data/subclips"
 checkpoints_path = r"./checkpoints"
 
 # 模型參數的讀取路徑
-checkpoint_name = "checkpoint_0.36179_0.43496_simple.pt"
+checkpoint_name = "checkpoint_0.30894_0.35772.pt"
 
 # 最終成果的路徑
 results_path = r"./data/results"
@@ -555,11 +545,11 @@ num_labels = 5
 same_seeds(1)
 
 if __name__ == "__main__":
-    pass
+    
     # 下方為生成影片主要步驟
-    # create_video_for_summary_and_questions()
+    create_video_for_summary_and_questions()
     # upload_files_to_s3()
     # synclabs_api()
     # delete_files_from_s3()
-    add_subtitles()
+    # add_subtitles()
     # concat_results()

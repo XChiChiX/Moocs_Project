@@ -9,7 +9,7 @@ from ultralytics import YOLO
 import cv2
 import torch
 from torch import nn
-from torch.utils.data import Dataset, DataLoader, random_split, WeightedRandomSampler
+from torch.utils.data import Dataset, DataLoader, random_split
 from torch.optim import Adam
 import whisper
 import transformers
@@ -24,9 +24,7 @@ import mediapipe as mp
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 import math
-from sklearn.cluster import KMeans
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
-from sklearn.utils.class_weight import compute_class_weight
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 from transformers.utils import logging
@@ -236,7 +234,7 @@ def compute_subclips_finger_movement():
     subclips_info.to_csv(os.path.join(subclips_path, "subclips_info.csv"), encoding='utf-8', index=False)
     print("\ncompute_subclips_finger_movement cost %ds\n" % (timeit.default_timer() - function_start_time))
 
-def label_subclips(num_labels, method):
+def label_subclips(num_labels):
     """
     標註每一筆訓練資料
     """
@@ -251,37 +249,20 @@ def label_subclips(num_labels, method):
     
     # 移動量由小到大排序
     subclips_info = subclips_info.sort_values("avg_movement")
-    
-    if method == "Equal":
-        
-        # 計算類別間的門檻值
-        threshold = [subclips_info.iloc[round((subclips_info.shape[0] - 1) * (i + 1) / num_labels), 2] for i in range(num_labels - 1)]
-        
-        # 取得移動量對應的類別編號
-        def get_class(movement, threshold):
-            for index, t in enumerate(threshold):
-                if movement < t:
-                    return index
-            return len(threshold)
-        
-        # 標註資料類別
-        subclips_info["label"] = subclips_info.apply(lambda row: get_class((float)(row.iloc[2]), threshold), axis=1)
-    
-    # 使用K-means對資料做分群
-    elif method == "Kmeans":
-        
-        # 分群
-        kmeans = KMeans(n_clusters=num_labels, random_state=0)
-        labels = kmeans.fit_predict(subclips_info[['avg_movement']])
-        
-        # 將標籤由小到大標註
-        cluster_centers = kmeans.cluster_centers_
-        cluster_centers = np.array([center[0] for center in cluster_centers])
-        sort_index = list(np.argsort(cluster_centers))
-        labels = [sort_index.index(i) for i in labels]
-        subclips_info['label'] = labels
 
+    # 計算類別間的門檻值
+    threshold = [subclips_info.iloc[round((subclips_info.shape[0] - 1) * (i + 1) / num_labels), 2] for i in range(num_labels - 1)]
     
+    # 取得移動量對應的類別編號
+    def get_class(movement, threshold):
+        for index, t in enumerate(threshold):
+            if movement < t:
+                return index
+        return len(threshold)
+    
+    # 標註資料類別
+    subclips_info["label"] = subclips_info.apply(lambda row: get_class((float)(row.iloc[2]), threshold), axis=1)
+
     # 依資料編號排序
     subclips_info = subclips_info.sort_index()
     
@@ -303,17 +284,17 @@ def label_subclips(num_labels, method):
     print("label_subclips cost %ds\n" % (timeit.default_timer() - function_start_time))
 
 class CustomDataset(Dataset):  
-    def __init__(self, subclips_path, max_length):
+    def __init__(self, subclips_path):
         self.subclips_info = pd.read_csv(os.path.join(subclips_path, "subclips_info.csv"))
         
         # BERT
         self.tokenizer = BertTokenizer.from_pretrained('bert-base-chinese')
-        self.texts = [self.tokenizer(text, padding='max_length', max_length=max_length, truncation=True, return_tensors="pt") for text in self.subclips_info["sentence"]]
+        self.texts = [self.tokenizer(text, padding='max_length', max_length=32, truncation=True, return_tensors="pt") for text in self.subclips_info["sentence"]]
         
         # Wav2vec2
         self.feature_extractor = Wav2Vec2FeatureExtractor.from_pretrained("facebook/wav2vec2-base")
         self.audio_names = [name.split('.')[0] + ".mp3" for name in self.subclips_info["file_name"]]
-        self.features = [self.feature_extractor(librosa.load(os.path.join(subclips_path, "unclassified_audio", name), sr=16000)[0], return_tensors="pt", padding="max_length", max_length=60000, truncation=True, sampling_rate=16000) for name in self.audio_names]
+        self.features = [self.feature_extractor(librosa.load(os.path.join(subclips_path, "unclassified_audio", name), sr=16000)[0], return_tensors="pt", padding="max_length", max_length=48000, truncation=True, sampling_rate=16000) for name in self.audio_names]
         self.labels = [label for label in self.subclips_info["label"]]
         
         self.label_count = {}
@@ -356,11 +337,15 @@ class Wav2Vec2BertClassifier(nn.Module):
         norm_weights_wav2vec2 = nn.functional.softmax(self.layer_weights_wav2vec2, dim=-1)
         output_wav2vec2 = (layers_output_wav2vec2 * norm_weights_wav2vec2.view(-1, 1, 1)).sum(dim=1)
         
+        # output_wav2vec2 = outputs[0]
+        
         # BERT embeddings
         layers_output_bert = self.bert(input_ids=input_bert, attention_mask=mask_bert,return_dict=True, output_hidden_states=True)
         layers_output_bert = torch.stack(layers_output_bert['hidden_states'][1:])
         norm_weights_bert = nn.functional.softmax(self.layer_weights_bert, dim=-1)
         output_bert = (layers_output_bert * norm_weights_bert.view(-1, 1, 1, 1)).sum(dim=0)
+        
+        # output_bert = layers_output_bert['last_hidden_state']
         
         # Global Average
         output_wav2vec2 = torch.mean(output_wav2vec2, dim=1)
@@ -374,7 +359,7 @@ class Wav2Vec2BertClassifier(nn.Module):
 
         return logits
     
-def train(mode):
+def train():
     """
     訓練模型
     """
@@ -385,71 +370,29 @@ def train(mode):
     if not os.path.exists(checkpoints_path):
         os.makedirs(checkpoints_path)
     
-    # 計算每個類別的損失權重
-    subclips_info = pd.read_csv(os.path.join(subclips_path, "subclips_info.csv"))
-    y = subclips_info["label"].to_numpy()
-    class_weights = compute_class_weight('balanced', classes=np.unique(y), y=y)
-    class_weights = torch.tensor(class_weights, dtype=torch.float).to(device)
-    
     model = Wav2Vec2BertClassifier(num_labels).to(device)
     optimizer = Adam(model.parameters(), lr=learning_rate)
-    criterion = nn.CrossEntropyLoss(weight=class_weights)
-    dataset = CustomDataset(subclips_path, max_length=max_length)
+    criterion = nn.CrossEntropyLoss()
+    dataset = CustomDataset(subclips_path)
     
     train_set, val_set, test_set = random_split(dataset, [0.6, 0.2, 0.2])
     
-    if mode == 'balance':
-        train_label_count = {i : 0 for i in range(num_labels)}
-        train_sample_weights = []
-        
-        for item in train_set:
-            train_label_count[item[2]] += 1
-            
-        for item in train_set:
-            train_sample_weights.append(1 / train_label_count[item[2]])
-        
-        train_indices = WeightedRandomSampler(train_sample_weights, len(train_set), replacement=True)
-        
-        print('Before balanced: ', train_label_count)
-        train_label_count = {i : 0 for i in range(num_labels)}
-        for index in train_indices:
-            train_label_count[train_set[index][2]] += 1
-        print('After balanced: ', train_label_count)
-        
-        train_loader = DataLoader(train_set, sampler=train_indices, batch_size=batch_size)
-    elif mode == 'undersample':
-        train_label_count = {i : 0 for i in range(num_labels)}
-        train_sample_weights = []
-        
-        for item in train_set:
-            train_label_count[item[2]] += 1
-            
-        for item in train_set:
-            train_sample_weights.append(1 / train_label_count[item[2]])
-        
-        train_indices = WeightedRandomSampler(train_sample_weights, min(train_label_count.values()) * num_labels, replacement=False)
-        
-        print('Before balanced: ', train_label_count)
-        train_label_count = {i : 0 for i in range(num_labels)}
-        for index in train_indices:
-            train_label_count[train_set[index][2]] += 1
-        print('After balanced: ', train_label_count)
-        
-        train_loader = DataLoader(train_set, sampler=train_indices, batch_size=batch_size)
-    elif mode == 'normal':
-        train_label_count = {i : 0 for i in range(num_labels)}
-        for item in train_set:
-            train_label_count[item[2]] += 1
-        print(train_label_count)
-        train_indices = train_set
-        train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True)
+    train_label_count = {i : 0 for i in range(num_labels)}
+    for item in train_set:
+        train_label_count[item[2]] += 1
+    print(train_label_count)
+    
+    train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True)
     val_loader = DataLoader(val_set, batch_size=batch_size)
     test_loader = DataLoader(test_set, batch_size=batch_size)
     
     model = Wav2Vec2BertClassifier(num_labels).to(device)
     optimizer = Adam(model.parameters(), lr=learning_rate)
     
-    best_acc = -1.0
+    best_loss = 99999
+    best_acc = -1
+    train_loss_list = []
+    val_loss_list = []
     
     for epoch in range(num_epoch):
         train_acc = 0.0
@@ -493,17 +436,21 @@ def train(mode):
                 val_acc += (val_pred.cpu() == labels.cpu()).sum().item()
                 val_loss += loss.item()
                 
-        print(f'[{epoch+1:03d}/{num_epoch:03d}] Train Acc: {train_acc/len(train_indices):3.5f} Loss: {train_loss/len(train_loader):3.5f} | Val Acc: {val_acc/len(val_set):3.5f} Loss: {val_loss/len(val_loader):3.5f}')
+        print(f'[{epoch+1:03d}/{num_epoch:03d}] Train Acc: {train_acc/len(train_set):3.5f} Loss: {train_loss/len(train_loader):3.5f} | Val Acc: {val_acc/len(val_set):3.5f} Loss: {val_loss/len(val_loader):3.5f}')
 
-        if val_acc > best_acc:
+        if (val_loss / len(val_loader)) < best_loss:
             
             # 刪除上一個pt檔
             if os.path.exists(os.path.join(checkpoints_path, f'checkpoint_{best_acc/len(val_set):.5f}.pt')):
                 os.remove(os.path.join(checkpoints_path, f'checkpoint_{best_acc/len(val_set):.5f}.pt'))
                 
+            best_loss = val_loss / len(val_loader)
             best_acc = val_acc
             torch.save({"model_state_dict":model.state_dict()}, os.path.join(checkpoints_path, f"checkpoint_{best_acc/len(val_set):.5f}.pt"))
-            print(f'saving model with acc {best_acc/len(val_set):.5f}')
+            print(f'saving model with loss {val_loss/len(val_loader):.5f}')
+        
+        train_loss_list.append(train_loss/len(train_loader))
+        val_loss_list.append(val_loss/len(val_loader))
 
     # Test
     y_pred = []
@@ -539,10 +486,19 @@ def train(mode):
     disp.plot()
     plt.show()
     
+    plt.plot(train_loss_list, 'r', label='training')
+    plt.plot(val_loss_list, 'b', label='validation')
+    plt.xlabel('epoch')
+    plt.ylabel('loss')
+    plt.legend()
+    plt.show()
+    
     # 刪除上一個pt檔
     if os.path.exists(os.path.join(checkpoints_path, f'checkpoint_{best_acc/len(val_set):.5f}.pt')):
         os.remove(os.path.join(checkpoints_path, f'checkpoint_{best_acc/len(val_set):.5f}.pt'))
         
+    global acc_sum
+    acc_sum += test_acc / len(test_set)
     torch.save({"model_state_dict":model.state_dict()}, os.path.join(checkpoints_path, f"checkpoint_{best_acc/len(val_set):.5f}_{test_acc/len(test_set):3.5f}.pt"))
     print(f'Test Acc: {test_acc/len(test_set):3.5f} Loss: {test_loss/len(test_loader):3.5f}')
             
@@ -667,7 +623,7 @@ def crop_clips(path, mode='image'):
         first = False
     
         frame = frame[y1:y2, max(x1 - expand_length, 0):min(x2 + expand_length, width), :]
-        frame = cv2.copyMakeBorder(frame, 0, 0, left_pad_length, right_pad_length, cv2.BORDER_CONSTANT, value=[255, 255, 255])
+        frame = cv2.resize(cv2.copyMakeBorder(frame, 0, 0, left_pad_length, right_pad_length, cv2.BORDER_CONSTANT, value=[255, 255, 255]), (512, 512))
         
         cv2.imwrite(os.path.join(crop_path, f'cropped_{img_name}'), frame)
             
@@ -678,7 +634,6 @@ def test():
     """
     測試用函數
     """
-    
     pass
     
 # 切割後片段的路徑
@@ -723,39 +678,43 @@ if __name__ == "__main__":
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     num_epoch = 10
     learning_rate = 1e-5
-    dropout = 0.2
     batch_size = 32
-    max_length = 30
     num_labels = 5
-    method = "Kmeans" # [Kmeans, Equal] 
-    mode = 'normal' # [normal, balance]
     
     same_seeds(1)
     # voice_to_text(r"./data\clips\1.mp4")
     # extract_subclips(r"C:\Users\Owner\Desktop\Project\data\clips\1.mp4")
     # mp4_to_mp3()
     # compute_subclips_finger_movement()
-    # label_subclips(num_labels=num_labels, method=method)
+    # label_subclips(num_labels=num_labels)
+
+    # train()
     
-    # label (1232 total)
-    # 0    315
-    # 1    436
-    # 2    302
-    # 3    138
-    # 4     41
-        
-    print(f'learning rate: {learning_rate}, batch size: {batch_size}, mode: {mode}')
-    for seed in range(10):
-        same_seeds(seed + 1)
-        print(f'Seed: {seed + 1}')
-        train(mode=mode)
-        
-    learning_rate = 5e-5
-    print(f'learning rate: {learning_rate}, batch size: {batch_size}, mode: {mode}')
-    for seed in range(10):
-        same_seeds(seed + 1)
-        print(f'Seed: {seed + 1}')
-        train(mode=mode)
+    # acc_sum = 0.0    
+    # print(f'learning rate: {learning_rate}')
+    # for seed in range(10):
+    #     same_seeds(seed + 1)
+    #     print(f'Seed: {seed + 1}')
+    #     train()
+    # print(acc_sum / 10)
+    
+    # acc_sum = 0.0   
+    # learning_rate = 3e-5
+    # print(f'learning rate: {learning_rate}')
+    # for seed in range(10):
+    #     same_seeds(seed + 1)
+    #     print(f'Seed: {seed + 1}')
+    #     train()
+    # print(acc_sum / 10)
+    
+    # acc_sum = 0.0    
+    # learning_rate = 5e-5
+    # print(f'learning rate: {learning_rate}')
+    # for seed in range(10):
+    #     same_seeds(seed + 1)
+    #     print(f'Seed: {seed + 1}')
+    #     train()
+    # print(acc_sum / 10)
     
     # video_to_images()
     # crop_clips(r"C:\Users\Owner\Desktop\Project\data\crop\0.jpg", mode='image')
