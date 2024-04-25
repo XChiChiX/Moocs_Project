@@ -500,7 +500,11 @@ def concat_results():
         
         video = VideoFileClip(os.path.join(clips_path, f"{clip_num}.mp4"))
         summary = VideoFileClip(os.path.join(subtitle_added_path, f"Summary{clip_num}.mp4"))
+        summary.audio = summary.audio.set_start(0.35)
+        summary = summary.set_end(summary.duration -0.35)
         questions = VideoFileClip(os.path.join(subtitle_added_path, f"Question{clip_num}.mp4"))
+        questions.audio = questions.audio.set_start(0.1)
+        questions = questions.set_end(questions.duration -0.1)
         result = concatenate_videoclips([video, summary, questions])
         result.write_videofile(os.path.join(results_path, f"{clip_num}.mp4"), logger=None)
         
@@ -557,5 +561,5 @@ if __name__ == "__main__":
     # upload_files_to_s3()
     # synclabs_api()
     # delete_files_from_s3()
-    # add_subtitles()
+    add_subtitles()
     # concat_results()
