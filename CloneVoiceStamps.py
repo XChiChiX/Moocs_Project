@@ -26,11 +26,11 @@ def CountParagraphs():
     return len(glob.glob('./data/ans/Summary*.mp3'))
 
 def start():
-    model = whisper.load_model("base")
+    model = whisper.load_model("large")
 
     for i in range(1 , CountParagraphs() + 1):
         audio = whisper.load_audio("./data/ans/Summary"+str(i)+".mp3")
-        result = model.transcribe(audio)
+        result = model.transcribe(audio, initial_prompt = "以下是普通話的句子")
 
         Summary_path = "./data/ans/Summary"+str(i)+".txt"
 
@@ -44,7 +44,7 @@ def start():
         print("Summary"+str(i)+".txt finish !")
 
         audio = whisper.load_audio("./data/ans/Question"+str(i)+".mp3")
-        result = model.transcribe(audio)
+        result = model.transcribe(audio, initial_prompt = "以下是普通話的句子")
 
         Question_path = "./data/ans/Question"+str(i)+".txt"
 

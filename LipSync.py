@@ -287,14 +287,13 @@ def synclabs_api():
     
     print("Start executing synclabs_api")
     function_start_time = timeit.default_timer()
-    clip_num = 2
+    clip_num = 1
     
     while os.path.exists(os.path.join(concat_path, f"Summary{clip_num}.mp4")) and os.path.exists(os.path.join(fake_audios_path, f"Summary{clip_num}.mp3")) and os.path.exists(os.path.join(concat_path, f"Question{clip_num}.mp4")) and os.path.exists(os.path.join(fake_audios_path, f"Question{clip_num}.mp3")):
 
         payload = {
             "audioUrl": f"https://goingcrazy.s3.ap-northeast-1.amazonaws.com/Question{clip_num}.mp3",
-            "model": "wav2lip++",
-            "synergize": True,
+            "model": "sync-1.6.0",
             "videoUrl": f"https://goingcrazy.s3.ap-northeast-1.amazonaws.com/Question{clip_num}.mp4"
         }
         
@@ -307,31 +306,13 @@ def synclabs_api():
         url = "https://api.synclabs.so/lipsync"
         response = requests.request("POST", url, json=payload, headers=headers)
         
-        ID = json.loads(response.text).get('id')
-        url = f"https://api.synclabs.so/lipsync/{ID}"
-        headers = {"x-api-key": "79e5c520-433f-433f-adba-6bb9e4be2fbb"}
+        ID_question = json.loads(response.text).get('id')
+        url_question = f"https://api.synclabs.so/lipsync/{ID_question}"
         done = False
-        
-        # 等待請求完成
-        while not done:
-            response = requests.request("GET", url, headers=headers)
-            
-            if json.loads(response.text).get('status') == 'COMPLETED':
-                url_link = json.loads(response.text)['url']
-                urllib.request.urlretrieve(url_link, os.path.join(synclabs_path, f'Question{clip_num}.mp4'))
-                print(f'Question{clip_num}.mp4 completed')
-                done = True
-            elif json.loads(response.text).get('status') == 'REJECTED':
-                print('餘額不足請充值')
-                done = True
-            elif json.loads(response.text).get('status') == 'FAILED':
-                print('對嘴失敗')
-                done = True
                 
         payload = {
             "audioUrl": f"https://goingcrazy.s3.ap-northeast-1.amazonaws.com/Summary{clip_num}.mp3",
-            "model": "wav2lip++",
-            "synergize": True,
+            "model": "sync-1.6.0",
             "videoUrl": f"https://goingcrazy.s3.ap-northeast-1.amazonaws.com/Summary{clip_num}.mp4"
         }
         
@@ -344,25 +325,45 @@ def synclabs_api():
         url = "https://api.synclabs.so/lipsync"
         response = requests.request("POST", url, json=payload, headers=headers)
     
-        ID = json.loads(response.text).get('id')
-        url = f"https://api.synclabs.so/lipsync/{ID}"
+        ID_summary = json.loads(response.text).get('id')
+        url_summary = f"https://api.synclabs.so/lipsync/{ID_summary}"
         headers = {"x-api-key": "79e5c520-433f-433f-adba-6bb9e4be2fbb"}
         done = False
         
         # 等待請求完成
         while not done:
-            response = requests.request("GET", url, headers=headers)
+            response = requests.request("GET", url_question, headers=headers)
+            print('\r' + json.loads(response.text).get('status'), end="")
             
             if json.loads(response.text).get('status') == 'COMPLETED':
-                url_link = json.loads(response.text)['url']
-                urllib.request.urlretrieve(url_link, os.path.join(synclabs_path, f'Summary{clip_num}.mp4'))
-                print(f'Summary{clip_num}.mp4 completed')
+                url_link = json.loads(response.text)['videoUrl']
+                urllib.request.urlretrieve(url_link, os.path.join(synclabs_path, f'Question{clip_num}.mp4'))
+                print(f' Question{clip_num}.mp4 completed')
                 done = True
             elif json.loads(response.text).get('status') == 'REJECTED':
-                print('餘額不足請充值')
+                print(' 餘額不足請充值')
                 done = True
             elif json.loads(response.text).get('status') == 'FAILED':
-                print('對嘴失敗')
+                print(' 對嘴失敗')
+                done = True
+                
+        done = False
+        
+        # 等待請求完成
+        while not done:
+            response = requests.request("GET", url_summary, headers=headers)
+            print('\r' + json.loads(response.text).get('status'), end="")
+            
+            if json.loads(response.text).get('status') == 'COMPLETED':
+                url_link = json.loads(response.text)['videoUrl']
+                urllib.request.urlretrieve(url_link, os.path.join(synclabs_path, f'Summary{clip_num}.mp4'))
+                print(f' Summary{clip_num}.mp4 completed')
+                done = True
+            elif json.loads(response.text).get('status') == 'REJECTED':
+                print(' 餘額不足請充值')
+                done = True
+            elif json.loads(response.text).get('status') == 'FAILED':
+                print(' 對嘴失敗')
                 done = True
                 
         clip_num += 1
@@ -494,7 +495,11 @@ def concat_results():
         
         video = VideoFileClip(os.path.join(clips_path, f"{clip_num}.mp4"))
         summary = VideoFileClip(os.path.join(subtitle_added_path, f"Summary{clip_num}.mp4"))
+        summary.audio = summary.audio.set_start(0.15)
+        summary = summary.set_end(summary.duration -0.15)
         questions = VideoFileClip(os.path.join(subtitle_added_path, f"Question{clip_num}.mp4"))
+        questions.audio = questions.audio.set_start(0.2)
+        questions = questions.set_end(questions.duration -0.2)
         result = concatenate_videoclips([video, summary, questions])
         result.write_videofile(os.path.join(results_path, f"{clip_num}.mp4"), logger=None)
         

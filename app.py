@@ -7,9 +7,9 @@ from pyScripts import claude3api
 from pyScripts import split_txt
 from pyScripts import splitVideo
 from pyScripts import zip_mp4_files
-# from VoiceClone import VoiceClone
-# import CloneVoiceStamps
-# from LipSync import create_video_for_summary_and_questions, upload_files_to_s3, synclabs_api, delete_files_from_s3, add_subtitles, concat_results
+from VoiceClone import VoiceClone
+import CloneVoiceStamps
+from LipSync import create_video_for_summary_and_questions, upload_files_to_s3, synclabs_api, delete_files_from_s3, add_subtitles, concat_results
 
 app = Flask(__name__)
 
@@ -30,7 +30,7 @@ def upload_file():
         # os.makedirs(save_path, exist_ok=True)
 
         file_path = os.path.join(save_path, uploaded_file.filename)
-        print("48763 ", file_path)
+        print(file_path)
 
         # 儲存檔案
         # uploaded_file.save(file_path)
