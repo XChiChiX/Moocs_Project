@@ -7,8 +7,12 @@ def split_video(input_video):
     # video_name = input_video.split('.')[0]
     
     start_times = get_start_times()
+    end_times = []
     print(start_times)
-    end_times = [start_times[1], start_times[2], total]  # 结束时间列表，单位为秒
+    for i in range(1, len(start_time)):
+        end_times.append(start_times[i])
+    end_times.append(total)
+    # end_times = [start_times[1], start_times[2], total]  # 结束时间列表，单位为秒
     
     for i, (start_time, end_time) in enumerate(zip(start_times, end_times)):
         sub_clip = clip.subclip(start_time, end_time)
