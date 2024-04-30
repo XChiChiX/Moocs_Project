@@ -218,15 +218,15 @@ def DataCheck(key):
                 os.mkdir("./data/output")
             if(os.path.isdir("./data/audio") == False):
                 os.mkdir("./data/audio")
-            Frieren = True
+            ParagraphsExist = True
             for i in range(1 , CountParagraphs() + 1):
                 if(os.path.exists('./data/clips/summary_part_'+str(i)+'.txt') == False):
-                    Frieren = False
+                    ParagraphsExist = False
                     break
                 if(os.path.exists('./data/clips/question_part_'+str(i)+'.txt') == False):
-                    Frieren = False
+                    ParagraphsExist = False
                     break
-            if(Frieren):
+            if(ParagraphsExist):
                 return 1
             else:
                 return 0
