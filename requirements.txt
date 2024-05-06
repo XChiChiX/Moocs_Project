@@ -20,3 +20,4 @@ openai-whisper
 flask
 elevenlabs==0.2.26
 anthropic
+openai

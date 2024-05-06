@@ -20,6 +20,8 @@ from transformers.utils import logging as transformers_logging
 transformers_logging.set_verbosity(transformers.logging.ERROR)
 import random
 import numpy as np
+from openai import OpenAI
+from PIL import Image, ImageDraw, ImageFont
 
 def same_seeds(seed):
     """
@@ -80,6 +82,34 @@ class Wav2Vec2BertClassifier(nn.Module):
         logits = self.classifier(output_concat)
 
         return logits
+    
+# define decorator
+def init_parameters(fun, **init_dict):
+    """
+    help you to set the parameters in one's habits
+    """
+    def job(*args, **option):
+        option.update(init_dict)
+        return fun(*args, **option)
+    return job
+
+
+def cv2_img_add_text(img, text, left_corner, text_rgb_color=(255, 0, 0), text_size=24, font='mingliu.ttc', **option):
+    """
+    USAGE:
+        cv2_img_add_text(img, '中文', (0, 0), text_rgb_color=(0, 255, 0), text_size=12, font='mingliu.ttc')
+    """
+    pil_img = img
+    if isinstance(pil_img, np.ndarray):
+        pil_img = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+    draw = ImageDraw.Draw(pil_img)
+    font_text = ImageFont.truetype(font=font, size=text_size, encoding=option.get('encoding', 'utf-8'))
+    draw.text(left_corner, text, text_rgb_color, font=font_text)
+    cv2_img = cv2.cvtColor(np.asarray(pil_img), cv2.COLOR_RGB2BGR)
+    if option.get('replace'):
+        img[:] = cv2_img[:]
+        return None
+    return cv2_img
 
 def create_video_for_summary_and_questions():
     """
@@ -105,14 +135,17 @@ def create_video_for_summary_and_questions():
     fps = cap.get(cv2.CAP_PROP_FPS)
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    cap.release()
     clip_num = 1
+    client = OpenAI()
+    
+    draw_text = init_parameters(cv2_img_add_text, text_size=48, text_rgb_color=(0, 0, 0), font='kaiu.ttf', replace=True)
         
     while os.path.exists(os.path.join(fake_audios_path, f"Summary{clip_num}.txt")) and os.path.exists(os.path.join(fake_audios_path, f"Summary{clip_num}.mp3")) and os.path.exists(os.path.join(fake_audios_path, f"Question{clip_num}.txt")) and os.path.exists(os.path.join(fake_audios_path, f"Question{clip_num}.mp3")):
         texts = pd.read_csv(os.path.join(fake_audios_path, f"Summary{clip_num}.txt"), sep=' ', header=None, encoding='utf-8')
         audio_segment = AudioSegment.from_mp3(os.path.join(fake_audios_path, f"Summary{clip_num}.mp3"))
         
         frame_count = 0
-        cap.release()
         
         writer = cv2.VideoWriter(os.path.join(concat_path, f"Summary{clip_num}.mp4"), cv2.VideoWriter_fourcc(*'mp4v'), fps, (width, height))
         
@@ -131,6 +164,23 @@ def create_video_for_summary_and_questions():
             label = torch.argmax(outputs).item()
             print(label)
             
+            try:
+                response = client.images.generate(
+                  model="dall-e-3",
+                  prompt=sentence,
+                  size="1024x1024",
+                  quality="standard",
+                  n=1,
+                )
+            
+                image_url = response.data[0].url
+                
+                img_data = requests.get(image_url).content
+                with open(r'./data/temp.png', 'wb') as handler:
+                    handler.write(img_data)
+            except:
+                print('Dall-e 3 request rejected.')
+            
             cap = cv2.VideoCapture(os.path.join(concat_source_path, f'{label}.mp4'))
             
             while cap.isOpened() and frame_count / fps < end_time:
@@ -140,6 +190,10 @@ def create_video_for_summary_and_questions():
                     cap.release()
                     cap = cv2.VideoCapture(os.path.join(concat_source_path, '0.mp4'))
                     continue
+
+                bg_img = cv2.resize(cv2.imread(r'./data/temp.png'), (512, 512))
+                
+                frame[540 - bg_img.shape[0] // 2:540 - bg_img.shape[0] // 2 + bg_img.shape[0], 300:300 + bg_img.shape[1], :] = bg_img
                 
                 writer.write(frame)
                 last_frame = frame
@@ -154,9 +208,8 @@ def create_video_for_summary_and_questions():
         
         texts = pd.read_csv(os.path.join(fake_audios_path, f"Question{clip_num}.txt"), sep=' ', header=None, encoding='utf-8')
         audio_segment = AudioSegment.from_mp3(os.path.join(fake_audios_path, f"Question{clip_num}.mp3"))
-        
         frame_count = 0
-        cap.release()
+        questions = []
         
         writer = cv2.VideoWriter(os.path.join(concat_path, f"Question{clip_num}.mp4"), cv2.VideoWriter_fourcc(*'mp4v'), fps, (width, height))
         
@@ -176,6 +229,7 @@ def create_video_for_summary_and_questions():
             print(label)
             
             cap = cv2.VideoCapture(os.path.join(concat_source_path, f'{label}.mp4'))
+            questions.append(sentence)
             
             while cap.isOpened() and frame_count / fps < end_time:
                 ret, frame = cap.read()
@@ -184,6 +238,9 @@ def create_video_for_summary_and_questions():
                     cap.release()
                     cap = cv2.VideoCapture(os.path.join(concat_source_path, '0.mp4'))
                     continue
+                
+                for i, question in enumerate(questions):
+                    draw_text(frame, question, (200, 100 + (i + 1) * 96))
                 
                 writer.write(frame)
                 last_frame = frame
@@ -199,6 +256,9 @@ def create_video_for_summary_and_questions():
     
     if os.path.exists(os.path.join(data_path, "temp.mp3")):
         os.remove(os.path.join(data_path, "temp.mp3"))
+        
+    if os.path.exists(os.path.join(data_path, "temp.png")):
+        os.remove(os.path.join(data_path, "temp.png"))
         
     print("create_video_for_summary_and_questions cost %d second\n" % (timeit.default_timer() - function_start_time)) 
 
@@ -287,7 +347,7 @@ def synclabs_api():
     
     print("Start executing synclabs_api")
     function_start_time = timeit.default_timer()
-    clip_num = 1
+    clip_num = 2
     
     while os.path.exists(os.path.join(concat_path, f"Summary{clip_num}.mp4")) and os.path.exists(os.path.join(fake_audios_path, f"Summary{clip_num}.mp3")) and os.path.exists(os.path.join(concat_path, f"Question{clip_num}.mp4")) and os.path.exists(os.path.join(fake_audios_path, f"Question{clip_num}.mp3")):
 
@@ -335,17 +395,20 @@ def synclabs_api():
             response = requests.request("GET", url_question, headers=headers)
             print('\r' + json.loads(response.text).get('status'), end="")
             
-            if json.loads(response.text).get('status') == 'COMPLETED':
-                url_link = json.loads(response.text)['videoUrl']
-                urllib.request.urlretrieve(url_link, os.path.join(synclabs_path, f'Question{clip_num}.mp4'))
-                print(f' Question{clip_num}.mp4 completed')
-                done = True
-            elif json.loads(response.text).get('status') == 'REJECTED':
-                print(' 餘額不足請充值')
-                done = True
-            elif json.loads(response.text).get('status') == 'FAILED':
-                print(' 對嘴失敗')
-                done = True
+            try:
+                if json.loads(response.text).get('status') == 'COMPLETED':
+                    url_link = json.loads(response.text)['videoUrl']
+                    urllib.request.urlretrieve(url_link, os.path.join(synclabs_path, f'Question{clip_num}.mp4'))
+                    print(f' Question{clip_num}.mp4 completed')
+                    done = True
+                elif json.loads(response.text).get('status') == 'REJECTED':
+                    print(' 餘額不足請充值')
+                    done = True
+                elif json.loads(response.text).get('status') == 'FAILED':
+                    print(' 對嘴失敗')
+                    done = True
+            except:
+                print('Cannot load synclabs response as json')
                 
         done = False
         
@@ -354,17 +417,20 @@ def synclabs_api():
             response = requests.request("GET", url_summary, headers=headers)
             print('\r' + json.loads(response.text).get('status'), end="")
             
-            if json.loads(response.text).get('status') == 'COMPLETED':
-                url_link = json.loads(response.text)['videoUrl']
-                urllib.request.urlretrieve(url_link, os.path.join(synclabs_path, f'Summary{clip_num}.mp4'))
-                print(f' Summary{clip_num}.mp4 completed')
-                done = True
-            elif json.loads(response.text).get('status') == 'REJECTED':
-                print(' 餘額不足請充值')
-                done = True
-            elif json.loads(response.text).get('status') == 'FAILED':
-                print(' 對嘴失敗')
-                done = True
+            try:
+                if json.loads(response.text).get('status') == 'COMPLETED':
+                    url_link = json.loads(response.text)['videoUrl']
+                    urllib.request.urlretrieve(url_link, os.path.join(synclabs_path, f'Summary{clip_num}.mp4'))
+                    print(f' Summary{clip_num}.mp4 completed')
+                    done = True
+                elif json.loads(response.text).get('status') == 'REJECTED':
+                    print(' 餘額不足請充值')
+                    done = True
+                elif json.loads(response.text).get('status') == 'FAILED':
+                    print(' 對嘴失敗')
+                    done = True
+            except:
+                print('Cannot load synclabs response as json')
                 
         clip_num += 1
             
@@ -493,14 +559,13 @@ def concat_results():
     
     while os.path.exists(os.path.join(clips_path, f"{clip_num}.mp4")) and os.path.exists(os.path.join(subtitle_added_path, f"Summary{clip_num}.mp4")) and os.path.exists(os.path.join(subtitle_added_path, f"Question{clip_num}.mp4")):
         
-        video = VideoFileClip(os.path.join(clips_path, f"{clip_num}.mp4"))
         summary = VideoFileClip(os.path.join(subtitle_added_path, f"Summary{clip_num}.mp4"))
         summary.audio = summary.audio.set_start(0.15)
         summary = summary.set_end(summary.duration -0.15)
         questions = VideoFileClip(os.path.join(subtitle_added_path, f"Question{clip_num}.mp4"))
         questions.audio = questions.audio.set_start(0.2)
         questions = questions.set_end(questions.duration -0.2)
-        result = concatenate_videoclips([video, summary, questions])
+        result = concatenate_videoclips([summary, questions])
         result.write_videofile(os.path.join(results_path, f"{clip_num}.mp4"), logger=None)
         
         clip_num += 1
@@ -552,9 +617,9 @@ same_seeds(1)
 if __name__ == "__main__":
     
     # 下方為生成影片主要步驟
-    create_video_for_summary_and_questions()
+    # create_video_for_summary_and_questions()
     # upload_files_to_s3()
     # synclabs_api()
     # delete_files_from_s3()
     # add_subtitles()
-    # concat_results()
+    concat_results()

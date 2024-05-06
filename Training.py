@@ -634,7 +634,18 @@ def test():
     """
     測試用函數
     """
-    pass
+    import json
+    import requests
+    import urllib
+    headers = {
+        "x-api-key": "f6c7857b-e17c-4894-903c-33059ccd9fac",
+        "Content-Type": "application/json"
+    }
+    url_summary = "https://api.synclabs.so/lipsync/57a66133-83e9-4bfa-be16-80f6a9a4f84b"
+    response = requests.request("GET", url_summary, headers=headers)
+    if json.loads(response.text).get('status') == 'COMPLETED':
+        url_link = json.loads(response.text)['videoUrl']
+        urllib.request.urlretrieve(url_link, os.path.join(synclabs_path, 'Summary1.mp4'))
     
 # 切割後片段的路徑
 clips_path = r"./data/clips"
@@ -719,4 +730,4 @@ if __name__ == "__main__":
     # video_to_images()
     # crop_clips(r"C:\Users\Owner\Desktop\Project\data\crop\0.jpg", mode='image')
     # process_animateanyone(r"C:\Users\Owner\Desktop\Moore-AnimateAnyone-master\output\5.mp4")
-    # test()
+    test()

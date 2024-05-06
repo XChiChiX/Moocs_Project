@@ -2,3 +2,4 @@
 安裝ffmpeg並新增至環境變數
 安裝imagemagick，安裝時勾選install legacy utilities
 安裝AWS CLI並輸入aws configure
+設定OPENAI_API_KEY環境變數
